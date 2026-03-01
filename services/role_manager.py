@@ -1,7 +1,7 @@
 import discord
-from core.config import Config          # <-- MODIFICATO
-from core import database as db         # <-- MODIFICATO
-from api import civinfo_api             # <-- MODIFICATO (import corretto)
+from core.config import Config
+from core import database as db
+from api import civinfo_api
 import logging
 from typing import Optional
 
@@ -66,15 +66,18 @@ async def update_settlement_role(member: discord.Member, old_settlement: str, ne
     if guest_role and guest_role in member.roles:
         await member.remove_roles(guest_role)
 
-async def handle_user_change(guild: discord.Guild, old_discord_id: str, new_member: discord.Member,
+async def handle_user_change(guild: discord.Guild, old_discord_id: Optional[str], new_member: discord.Member,
                              old_settlement: str, new_settlement: Optional[str]):
-    """Handle Discord user change: remove roles from old member, assign to new."""
-    old_member = guild.get_member(int(old_discord_id))
-    if old_member:
-        await remove_all_citizen_roles(old_member, old_settlement)
-        logger.info(f"Removed roles from old member {old_member} (ID {old_discord_id})")
+    """Handle Discord user change: remove roles from old member (if any), assign to new."""
+    if old_discord_id:
+        old_member = guild.get_member(int(old_discord_id))
+        if old_member:
+            await remove_all_citizen_roles(old_member, old_settlement)
+            logger.info(f"Removed roles from old member {old_member} (ID {old_discord_id})")
+        else:
+            logger.warning(f"Old member with ID {old_discord_id} not found in server")
     else:
-        logger.warning(f"Old member with ID {old_discord_id} not found in server")
+        logger.debug("No previous Discord user linked, skipping role removal.")
 
     target_settlement = new_settlement if new_settlement else old_settlement
     await assign_citizen_roles(new_member, target_settlement)
