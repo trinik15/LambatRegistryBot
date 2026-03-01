@@ -32,8 +32,9 @@ class ReportsCog(commands.Cog):
     def has_full_access(self, interaction):
         if interaction.user.id == Config.OWNER_ID:
             return True
-        role_ids = [r.id for r in interaction.user.roles]
-        return Config.FULL_ACCESS_ROLE_ID in role_ids
+        user_role_ids = [r.id for r in interaction.user.roles]
+        # Controlla se almeno uno dei ruoli dell'utente è nella lista FULL_ACCESS_ROLE_IDS
+        return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
 
     def has_view_access(self, interaction):
         if self.has_full_access(interaction):
