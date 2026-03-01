@@ -3,7 +3,8 @@ import os
 class Config:
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
     OWNER_ID = int(os.getenv("OWNER_ID", 0))
-    FULL_ACCESS_ROLE_ID = int(os.getenv("FULL_ACCESS_ROLE_ID", 0))      # Council
+    # Ora FULL_ACCESS_ROLE_IDS è una lista di ID (separati da virgola)
+    FULL_ACCESS_ROLE_IDS = [int(x.strip()) for x in os.getenv("FULL_ACCESS_ROLE_IDS", "").split(",") if x.strip()]
     VIEW_ACCESS_ROLE_ID = int(os.getenv("VIEW_ACCESS_ROLE_ID", 0))      # Nobility (view only)
 
     # Role IDs for automatic assignment
