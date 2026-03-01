@@ -22,8 +22,9 @@ class DataCog(commands.Cog):
     def has_full_access(self, interaction):
         if self.is_owner(interaction):
             return True
-        role_ids = [r.id for r in interaction.user.roles]
-        return Config.FULL_ACCESS_ROLE_ID in role_ids
+        user_role_ids = [r.id for r in interaction.user.roles]
+        # Controlla se almeno uno dei ruoli dell'utente è nella lista FULL_ACCESS_ROLE_IDS
+        return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
 
     @data_group.command(name="backup", description="Create a manual backup")
     async def backup(self, interaction: discord.Interaction):
