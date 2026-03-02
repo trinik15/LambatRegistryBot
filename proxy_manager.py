@@ -9,6 +9,14 @@ from typing import List, Dict, Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ProxyManager")
 
+# Lista statica di proxy noti (alcuni potrebbero funzionare)
+FALLBACK_PROXIES = [
+    "45.190.78.20:999",
+    "160.20.55.235:8080",
+    "45.4.202.144:999",
+    # Aggiungi altri se conosci
+]
+
 class ProxyManager:
     def __init__(self, db_path="proxies.db"):
         self.db_path = db_path
@@ -18,7 +26,6 @@ class ProxyManager:
         self.running = True
 
     def _init_db(self):
-        """Crea le tabelle necessarie."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS proxies (
@@ -49,7 +56,6 @@ class ProxyManager:
         await self.session.close()
 
     async def fetch_proxy_sources(self):
-        """Raccoglie proxy da varie fonti (più fonti per maggiore affidabilità)."""
         sources = [
             "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
             "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
@@ -72,27 +78,14 @@ class ProxyManager:
             except Exception as e:
                 logger.warning(f"Errore nello scaricare {url}: {e}")
             await asyncio.sleep(1)
+        # Aggiungi i fallback se non sono già presenti
+        for p in FALLBACK_PROXIES:
+            if p not in all_proxies:
+                all_proxies.append(p)
         return list(set(all_proxies))
 
     async def test_proxy(self, proxy: str) -> Optional[Dict]:
-        """Testa un proxy: prima verifica connettività con httpbin, poi controllo ban Discord."""
-        # Test base con httpbin (timeout 15 secondi)
-        test_url = "http://httpbin.org/ip"
-        try:
-            start = time.time()
-            async with self.session.get(
-                test_url,
-                proxy=f"http://{proxy}",
-                timeout=aiohttp.ClientTimeout(total=15),
-                ssl=False
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                latency = time.time() - start
-        except Exception:
-            return None
-
-        # Test con Discord (timeout 15 secondi)
+        """Testa solo Discord (più veloce)."""
         discord_url = "https://discord.com/api/v10/users/@me"
         headers = {"Authorization": "Bot fake_token"}
         try:
@@ -100,7 +93,7 @@ class ProxyManager:
             async with self.session.get(
                 discord_url,
                 proxy=f"http://{proxy}",
-                timeout=aiohttp.ClientTimeout(total=15),
+                timeout=aiohttp.ClientTimeout(total=8),  # timeout ridotto
                 headers=headers,
                 ssl=False
             ) as resp:
@@ -116,20 +109,19 @@ class ProxyManager:
             return None
 
     async def update_proxy_pool(self):
-        """Aggiorna il pool testando nuovi proxy (ora testa fino a 500 proxy per ciclo)."""
         logger.info("Avvio aggiornamento pool proxy...")
         new_proxies = await self.fetch_proxy_sources()
         if not new_proxies:
             logger.warning("Nessun proxy trovato dalle fonti.")
             return
 
-        # Aumentiamo il numero di proxy testati a 500
-        semaphore = asyncio.Semaphore(20)
+        # Aumentiamo concorrenza e numero di proxy testati
+        semaphore = asyncio.Semaphore(50)  # da 20 a 50
         async def test_with_semaphore(proxy):
             async with semaphore:
                 return await self.test_proxy(proxy)
 
-        tasks = [test_with_semaphore(p) for p in new_proxies[:500]]  # da 200 a 500
+        tasks = [test_with_semaphore(p) for p in new_proxies[:1000]]  # da 500 a 1000
         results = await asyncio.gather(*tasks)
 
         valid = [r for r in results if r and not r["banned"]]
@@ -153,7 +145,6 @@ class ProxyManager:
         logger.info(f"Aggiornamento completato: {len(valid)} validi, {len(banned)} bannati.")
 
     async def get_next_proxy(self) -> Optional[str]:
-        """Restituisce il miglior proxy disponibile (più veloce)."""
         async with self.lock:
             with sqlite3.connect(self.db_path) as conn:
                 cur = conn.execute("""
@@ -165,7 +156,6 @@ class ProxyManager:
                 return row[0] if row else None
 
     async def mark_proxy_failed(self, proxy: str):
-        """Incrementa il contatore di fallimenti e banna se necessario."""
         async with self.lock:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("UPDATE proxies SET fail_count = fail_count + 1 WHERE proxy = ?", (proxy,))
@@ -180,7 +170,6 @@ class ProxyManager:
                 conn.commit()
 
     async def run_periodic_update(self, interval=1800):
-        """Esegue update periodico ogni 'interval' secondi."""
         while self.running:
             await self.update_proxy_pool()
             await asyncio.sleep(interval)
