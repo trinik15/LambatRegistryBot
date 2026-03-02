@@ -9,12 +9,11 @@ from typing import List, Dict, Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ProxyManager")
 
-# Lista statica di proxy noti (alcuni potrebbero funzionare)
+# Lista statica di proxy noti (puoi espanderla)
 FALLBACK_PROXIES = [
     "45.190.78.20:999",
     "160.20.55.235:8080",
     "45.4.202.144:999",
-    # Aggiungi altri se conosci
 ]
 
 class ProxyManager:
@@ -78,14 +77,12 @@ class ProxyManager:
             except Exception as e:
                 logger.warning(f"Errore nello scaricare {url}: {e}")
             await asyncio.sleep(1)
-        # Aggiungi i fallback se non sono già presenti
         for p in FALLBACK_PROXIES:
             if p not in all_proxies:
                 all_proxies.append(p)
         return list(set(all_proxies))
 
     async def test_proxy(self, proxy: str) -> Optional[Dict]:
-        """Testa solo Discord (più veloce)."""
         discord_url = "https://discord.com/api/v10/users/@me"
         headers = {"Authorization": "Bot fake_token"}
         try:
@@ -93,7 +90,7 @@ class ProxyManager:
             async with self.session.get(
                 discord_url,
                 proxy=f"http://{proxy}",
-                timeout=aiohttp.ClientTimeout(total=8),  # timeout ridotto
+                timeout=aiohttp.ClientTimeout(total=5),  # ridotto a 5 secondi
                 headers=headers,
                 ssl=False
             ) as resp:
@@ -105,23 +102,22 @@ class ProxyManager:
                 else:
                     return None
         except Exception as e:
-            logger.debug(f"Proxy {proxy} fallito su Discord: {e}")
+            logger.debug(f"Proxy {proxy} fallito: {e}")
             return None
 
     async def update_proxy_pool(self):
         logger.info("Avvio aggiornamento pool proxy...")
         new_proxies = await self.fetch_proxy_sources()
         if not new_proxies:
-            logger.warning("Nessun proxy trovato dalle fonti.")
+            logger.warning("Nessun proxy trovato.")
             return
 
-        # Aumentiamo concorrenza e numero di proxy testati
-        semaphore = asyncio.Semaphore(50)  # da 20 a 50
+        semaphore = asyncio.Semaphore(100)  # aumentato a 100
         async def test_with_semaphore(proxy):
             async with semaphore:
                 return await self.test_proxy(proxy)
 
-        tasks = [test_with_semaphore(p) for p in new_proxies[:1000]]  # da 500 a 1000
+        tasks = [test_with_semaphore(p) for p in new_proxies[:2000]]  # aumentato a 2000
         results = await asyncio.gather(*tasks)
 
         valid = [r for r in results if r and not r["banned"]]
@@ -169,7 +165,7 @@ class ProxyManager:
                     conn.execute("DELETE FROM proxies WHERE proxy = ?", (proxy,))
                 conn.commit()
 
-    async def run_periodic_update(self, interval=1800):
+    async def run_periodic_update(self, interval=600):  # ridotto a 600 secondi
         while self.running:
             await self.update_proxy_pool()
             await asyncio.sleep(interval)
