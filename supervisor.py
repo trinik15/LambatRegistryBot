@@ -1,9 +1,7 @@
-# supervisor.py
 import asyncio
 import subprocess
 import sys
 import os
-import signal
 import logging
 from proxy_manager import ProxyManager
 
@@ -15,7 +13,8 @@ class BotSupervisor:
         self.proxy_manager = ProxyManager()
         self.current_proxy = None
         self.process = None
-        self.restart_delay = 1  # secondi iniziali
+        self.restart_delay = 1
+        self.proxy_failures = {}  # proxy -> numero di fallimenti consecutivi
 
     async def start_bot(self, proxy):
         """Avvia il bot con un proxy specifico."""
@@ -28,7 +27,6 @@ class BotSupervisor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        # Opzionale: log in tempo reale
         asyncio.create_task(self.log_output())
 
     async def log_output(self):
@@ -42,40 +40,49 @@ class BotSupervisor:
             line = await self.process.stderr.readline()
             if not line:
                 break
-            logger.error(f"[BOT] {line.decode().strip()}")
+            logger.info(f"[BOT] {line.decode().strip()}")  # Usiamo INFO per evitare confusione
 
     async def run(self):
         """Ciclo principale del supervisor."""
         async with self.proxy_manager:
-            # Avvia aggiornamento periodico dei proxy in background
             asyncio.create_task(self.proxy_manager.run_periodic_update())
 
             while True:
-                # Ottieni un proxy
                 self.current_proxy = await self.proxy_manager.get_next_proxy()
                 if not self.current_proxy:
                     logger.warning("Nessun proxy disponibile. Attendo 60 secondi...")
                     await asyncio.sleep(60)
                     continue
 
+                if self.current_proxy not in self.proxy_failures:
+                    self.proxy_failures[self.current_proxy] = 0
+
                 await self.start_bot(self.current_proxy)
-                # Attendi la terminazione del processo
                 return_code = await self.process.wait()
 
                 if return_code == 429:
                     logger.error(f"Proxy {self.current_proxy} bannato (429).")
                     await self.proxy_manager.mark_proxy_failed(self.current_proxy)
-                    self.restart_delay = 1  # reset delay
+                    self.proxy_failures.pop(self.current_proxy, None)
+                    self.restart_delay = 1
                 elif return_code == 0:
                     logger.info("Bot terminato volontariamente. Supervisor termina.")
                     break
                 else:
-                    logger.error(f"Bot crashato con codice {return_code}. Riavvio con stesso proxy tra {self.restart_delay}s")
-                    await asyncio.sleep(self.restart_delay)
-                    self.restart_delay = min(self.restart_delay * 2, 60)  # backoff
-                    # Non marcamo il proxy come fallito, potrebbe essere un bug
+                    self.proxy_failures[self.current_proxy] += 1
+                    logger.error(f"Bot crashato con codice {return_code} per proxy {self.current_proxy} (tentativo {self.proxy_failures[self.current_proxy]})")
 
-                # Piccola pausa prima di riavviare
+                    if self.proxy_failures[self.current_proxy] >= 2:
+                        logger.warning(f"Proxy {self.current_proxy} fallito 2 volte consecutivamente. Rimozione.")
+                        await self.proxy_manager.mark_proxy_failed(self.current_proxy)
+                        self.proxy_failures.pop(self.current_proxy, None)
+                        self.restart_delay = 1
+                    else:
+                        logger.info(f"Riavvio con stesso proxy tra {self.restart_delay}s")
+                        await asyncio.sleep(self.restart_delay)
+                        self.restart_delay = min(self.restart_delay * 2, 60)
+                        continue
+
                 await asyncio.sleep(2)
 
 if __name__ == "__main__":
