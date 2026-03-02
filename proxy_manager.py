@@ -49,17 +49,21 @@ class ProxyManager:
         await self.session.close()
 
     async def fetch_proxy_sources(self):
-        """Raccoglie proxy da varie fonti."""
+        """Raccoglie proxy da varie fonti (più fonti per maggiore affidabilità)."""
         sources = [
             "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
             "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
             "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
             "https://raw.githubusercontent.com/mertguvencli/http-proxy-list/main/proxy-list.txt",
+            "https://www.proxy-list.download/api/v1/get?type=http",
+            "https://api.proxyscrape.com/?request=displayproxies&proxytype=http&timeout=10000&country=all&ssl=all&anonymity=all",
+            "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
+            "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
         ]
         all_proxies = []
         for url in sources:
             try:
-                async with self.session.get(url, timeout=10) as resp:
+                async with self.session.get(url, timeout=15) as resp:
                     if resp.status == 200:
                         text = await resp.text()
                         proxies = [line.strip() for line in text.splitlines() if line.strip() and ":" in line]
@@ -72,14 +76,14 @@ class ProxyManager:
 
     async def test_proxy(self, proxy: str) -> Optional[Dict]:
         """Testa un proxy: prima verifica connettività con httpbin, poi controllo ban Discord."""
-        # Test base con httpbin
+        # Test base con httpbin (timeout 15 secondi)
         test_url = "http://httpbin.org/ip"
         try:
             start = time.time()
             async with self.session.get(
                 test_url,
                 proxy=f"http://{proxy}",
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=15),
                 ssl=False
             ) as resp:
                 if resp.status != 200:
@@ -88,7 +92,7 @@ class ProxyManager:
         except Exception:
             return None
 
-        # Test con Discord
+        # Test con Discord (timeout 15 secondi)
         discord_url = "https://discord.com/api/v10/users/@me"
         headers = {"Authorization": "Bot fake_token"}
         try:
@@ -96,7 +100,7 @@ class ProxyManager:
             async with self.session.get(
                 discord_url,
                 proxy=f"http://{proxy}",
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=15),
                 headers=headers,
                 ssl=False
             ) as resp:
@@ -112,19 +116,20 @@ class ProxyManager:
             return None
 
     async def update_proxy_pool(self):
-        """Aggiorna il pool testando nuovi proxy."""
+        """Aggiorna il pool testando nuovi proxy (ora testa fino a 500 proxy per ciclo)."""
         logger.info("Avvio aggiornamento pool proxy...")
         new_proxies = await self.fetch_proxy_sources()
         if not new_proxies:
             logger.warning("Nessun proxy trovato dalle fonti.")
             return
 
+        # Aumentiamo il numero di proxy testati a 500
         semaphore = asyncio.Semaphore(20)
         async def test_with_semaphore(proxy):
             async with semaphore:
                 return await self.test_proxy(proxy)
 
-        tasks = [test_with_semaphore(p) for p in new_proxies[:200]]
+        tasks = [test_with_semaphore(p) for p in new_proxies[:500]]  # da 200 a 500
         results = await asyncio.gather(*tasks)
 
         valid = [r for r in results if r and not r["banned"]]
