@@ -1,13 +1,10 @@
-# proxy_manager.py
 import asyncio
 import aiohttp
 import sqlite3
-import json
 import time
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-import random
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ProxyManager")
@@ -65,57 +62,69 @@ class ProxyManager:
                 async with self.session.get(url, timeout=10) as resp:
                     if resp.status == 200:
                         text = await resp.text()
-                        # Estrae IP:port da ogni riga
                         proxies = [line.strip() for line in text.splitlines() if line.strip() and ":" in line]
                         all_proxies.extend(proxies)
                         logger.info(f"Trovati {len(proxies)} proxy da {url}")
             except Exception as e:
                 logger.warning(f"Errore nello scaricare {url}: {e}")
-            await asyncio.sleep(1)  # delay tra le richieste
-        return list(set(all_proxies))  # rimuove duplicati
+            await asyncio.sleep(1)
+        return list(set(all_proxies))
 
     async def test_proxy(self, proxy: str) -> Optional[Dict]:
-        """Testa un proxy: validità e ban da Discord."""
-        test_url = "https://discord.com/api/v10/users/@me"
-        headers = {"Authorization": "Bot fake_token"}  # token falso per test
-        start = time.time()
+        """Testa un proxy: prima verifica connettività con httpbin, poi controllo ban Discord."""
+        # Test base con httpbin
+        test_url = "http://httpbin.org/ip"
         try:
+            start = time.time()
             async with self.session.get(
                 test_url,
                 proxy=f"http://{proxy}",
                 timeout=aiohttp.ClientTimeout(total=10),
+                ssl=False
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                latency = time.time() - start
+        except Exception:
+            return None
+
+        # Test con Discord
+        discord_url = "https://discord.com/api/v10/users/@me"
+        headers = {"Authorization": "Bot fake_token"}
+        try:
+            start = time.time()
+            async with self.session.get(
+                discord_url,
+                proxy=f"http://{proxy}",
+                timeout=aiohttp.ClientTimeout(total=10),
                 headers=headers,
-                ssl=False  # per semplificare, ma attenzione
+                ssl=False
             ) as resp:
                 latency = time.time() - start
                 if resp.status == 401:
-                    # Proxy valido e non bannato (risposta autorizzata fallita)
                     return {"proxy": proxy, "latency": latency, "banned": False}
                 elif resp.status in (429, 403):
-                    # Bannato da Discord
                     return {"proxy": proxy, "latency": latency, "banned": True}
                 else:
-                    # Altro codice (es. 500) -> probabilmente non funzionante
                     return None
         except Exception as e:
-            logger.debug(f"Proxy {proxy} fallito: {e}")
+            logger.debug(f"Proxy {proxy} fallito su Discord: {e}")
             return None
 
     async def update_proxy_pool(self):
-        """Ciclo principale: scarica nuovi proxy, testa e aggiorna DB."""
+        """Aggiorna il pool testando nuovi proxy."""
         logger.info("Avvio aggiornamento pool proxy...")
         new_proxies = await self.fetch_proxy_sources()
         if not new_proxies:
             logger.warning("Nessun proxy trovato dalle fonti.")
             return
 
-        # Test in parallelo con limite di concorrenza
         semaphore = asyncio.Semaphore(20)
         async def test_with_semaphore(proxy):
             async with semaphore:
                 return await self.test_proxy(proxy)
 
-        tasks = [test_with_semaphore(p) for p in new_proxies[:200]]  # limitiamo a 200 per non esagerare
+        tasks = [test_with_semaphore(p) for p in new_proxies[:200]]
         results = await asyncio.gather(*tasks)
 
         valid = [r for r in results if r and not r["banned"]]
@@ -123,52 +132,38 @@ class ProxyManager:
 
         async with self.lock:
             with sqlite3.connect(self.db_path) as conn:
-                # Inserisci proxy validi
                 for r in valid:
                     conn.execute("""
                         INSERT OR REPLACE INTO proxies (proxy, type, latency, last_tested, success_count)
                         VALUES (?, 'http', ?, ?, COALESCE((SELECT success_count FROM proxies WHERE proxy=?), 0) + 1)
                     """, (r["proxy"], r["latency"], datetime.now(), r["proxy"]))
-                # Marca i bannati
                 for r in banned:
                     conn.execute("""
                         INSERT OR REPLACE INTO blacklist (proxy, banned_until)
                         VALUES (?, ?)
                     """, (r["proxy"], datetime.now() + timedelta(hours=24)))
-                    # Rimuovi dalla tabella proxy se presente
                     conn.execute("DELETE FROM proxies WHERE proxy = ?", (r["proxy"],))
                 conn.commit()
 
         logger.info(f"Aggiornamento completato: {len(valid)} validi, {len(banned)} bannati.")
 
     async def get_next_proxy(self) -> Optional[str]:
-        """Restituisce il miglior proxy disponibile (più veloce) e lo rimuove dalla coda."""
+        """Restituisce il miglior proxy disponibile (più veloce)."""
         async with self.lock:
             with sqlite3.connect(self.db_path) as conn:
-                # Cerca proxy non bannati, ordinati per latenza
                 cur = conn.execute("""
                     SELECT proxy FROM proxies
                     WHERE (banned_until IS NULL OR banned_until < ?)
                     ORDER BY latency ASC LIMIT 1
                 """, (datetime.now(),))
                 row = cur.fetchone()
-                if row:
-                    proxy = row[0]
-                    # Rimuoviamo temporaneamente? In realtà lo lasciamo, ma potremmo segnarlo come "in uso"
-                    # Per semplicità, lo lasciamo; se fallisce verrà rimosso dopo
-                    return proxy
-                return None
+                return row[0] if row else None
 
     async def mark_proxy_failed(self, proxy: str):
         """Incrementa il contatore di fallimenti e banna se necessario."""
         async with self.lock:
             with sqlite3.connect(self.db_path) as conn:
-                # Incrementa fail_count
-                conn.execute("""
-                    UPDATE proxies SET fail_count = fail_count + 1
-                    WHERE proxy = ?
-                """, (proxy,))
-                # Se fail_count supera una soglia, metti in blacklist
+                conn.execute("UPDATE proxies SET fail_count = fail_count + 1 WHERE proxy = ?", (proxy,))
                 cur = conn.execute("SELECT fail_count FROM proxies WHERE proxy = ?", (proxy,))
                 row = cur.fetchone()
                 if row and row[0] >= 3:
