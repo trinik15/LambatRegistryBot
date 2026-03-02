@@ -3,10 +3,33 @@ import subprocess
 import sys
 import os
 import logging
+import threading
+import http.server
+import socketserver
 from proxy_manager import ProxyManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Supervisor")
+
+# ===== Server HTTP keepalive per Render =====
+PORT = int(os.environ.get('PORT', 10000))
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"Supervisor is running.")
+    def log_message(self, format, *args):
+        pass
+
+def run_http_server():
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        httpd.serve_forever()
+
+# Avvia il server in un thread daemon
+threading.Thread(target=run_http_server, daemon=True).start()
+# ============================================
 
 class BotSupervisor:
     def __init__(self):
