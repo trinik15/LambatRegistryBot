@@ -9,7 +9,7 @@ from typing import List, Dict, Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ProxyManager")
 
-# Lista statica di proxy noti (puoi espanderla)
+# Lista statica di proxy noti (fallback se le fonti online falliscono)
 FALLBACK_PROXIES = [
     "45.190.78.20:999",
     "160.20.55.235:8080",
@@ -54,35 +54,55 @@ class ProxyManager:
     async def __aexit__(self, *args):
         await self.session.close()
 
+    async def fetch_clearproxy_list(self):
+        """Scarica la lista di proxy già testati per Discord da ClearProxy."""
+        url = "https://raw.githubusercontent.com/ClearProxy/checked-proxy-list/main/custom/discord/http.txt"
+        try:
+            async with self.session.get(url, timeout=15) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    proxies = [line.strip() for line in text.splitlines() if line.strip() and ":" in line]
+                    logger.info(f"Trovati {len(proxies)} proxy validi per Discord da ClearProxy")
+                    return proxies
+                else:
+                    logger.warning(f"ClearProxy list returned status {resp.status}")
+                    return []
+        except Exception as e:
+            logger.warning(f"Errore nel scaricare lista ClearProxy: {e}")
+            return []
+
     async def fetch_proxy_sources(self):
-        sources = [
+        """Raccoglie proxy da ClearProxy (fonte principale) e da altre fonti come fallback."""
+        # Fonte principale: ClearProxy
+        main_proxies = await self.fetch_clearproxy_list()
+
+        # Fonti secondarie (per aumentare il pool)
+        other_sources = [
             "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
             "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
             "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt",
-            "https://raw.githubusercontent.com/mertguvencli/http-proxy-list/main/proxy-list.txt",
-            "https://www.proxy-list.download/api/v1/get?type=http",
-            "https://api.proxyscrape.com/?request=displayproxies&proxytype=http&timeout=10000&country=all&ssl=all&anonymity=all",
-            "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt",
-            "https://raw.githubusercontent.com/roosterkid/openproxylist/main/HTTPS_RAW.txt",
         ]
-        all_proxies = []
-        for url in sources:
+        all_proxies = set(main_proxies)  # partiamo dai proxy di ClearProxy
+        for url in other_sources:
             try:
                 async with self.session.get(url, timeout=15) as resp:
                     if resp.status == 200:
                         text = await resp.text()
                         proxies = [line.strip() for line in text.splitlines() if line.strip() and ":" in line]
-                        all_proxies.extend(proxies)
+                        all_proxies.update(proxies)
                         logger.info(f"Trovati {len(proxies)} proxy da {url}")
             except Exception as e:
                 logger.warning(f"Errore nello scaricare {url}: {e}")
             await asyncio.sleep(1)
+
+        # Aggiungi i fallback statici
         for p in FALLBACK_PROXIES:
-            if p not in all_proxies:
-                all_proxies.append(p)
-        return list(set(all_proxies))
+            all_proxies.add(p)
+
+        return list(all_proxies)
 
     async def test_proxy(self, proxy: str) -> Optional[Dict]:
+        """Test rapido con Discord (timeout 5 secondi)."""
         discord_url = "https://discord.com/api/v10/users/@me"
         headers = {"Authorization": "Bot fake_token"}
         try:
@@ -90,7 +110,7 @@ class ProxyManager:
             async with self.session.get(
                 discord_url,
                 proxy=f"http://{proxy}",
-                timeout=aiohttp.ClientTimeout(total=5),  # ridotto a 5 secondi
+                timeout=aiohttp.ClientTimeout(total=5),
                 headers=headers,
                 ssl=False
             ) as resp:
@@ -109,15 +129,16 @@ class ProxyManager:
         logger.info("Avvio aggiornamento pool proxy...")
         new_proxies = await self.fetch_proxy_sources()
         if not new_proxies:
-            logger.warning("Nessun proxy trovato.")
+            logger.warning("Nessun proxy trovato dalle fonti.")
             return
 
-        semaphore = asyncio.Semaphore(100)  # aumentato a 100
+        # Concorrenza alta perché la lista è più piccola e i test sono rapidi
+        semaphore = asyncio.Semaphore(50)
         async def test_with_semaphore(proxy):
             async with semaphore:
                 return await self.test_proxy(proxy)
 
-        tasks = [test_with_semaphore(p) for p in new_proxies[:2000]]  # aumentato a 2000
+        tasks = [test_with_semaphore(p) for p in new_proxies]
         results = await asyncio.gather(*tasks)
 
         valid = [r for r in results if r and not r["banned"]]
@@ -165,7 +186,7 @@ class ProxyManager:
                     conn.execute("DELETE FROM proxies WHERE proxy = ?", (proxy,))
                 conn.commit()
 
-    async def run_periodic_update(self, interval=600):  # ridotto a 600 secondi
+    async def run_periodic_update(self, interval=600):  # ogni 10 minuti
         while self.running:
             await self.update_proxy_pool()
             await asyncio.sleep(interval)
