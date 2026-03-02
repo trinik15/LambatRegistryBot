@@ -50,18 +50,19 @@ class BotSupervisor:
         self.login_detected.clear()
         asyncio.create_task(self.monitor_output())
         try:
-            await asyncio.wait_for(self.login_detected.wait(), timeout=30)  # ridotto a 30 secondi
+            await asyncio.wait_for(self.login_detected.wait(), timeout=60)
             logger.info(f"Bot con proxy {proxy} ha effettuato il login con successo.")
             return_code = await self.process.wait()
             return return_code
         except asyncio.TimeoutError:
-            logger.error(f"Bot con proxy {proxy} non ha effettuato il login entro 30s. Terminazione.")
-            self.process.terminate()
-            try:
-                await asyncio.wait_for(self.process.wait(), timeout=5)
-            except:
-                self.process.kill()
-                await self.process.wait()
+            logger.error(f"Bot con proxy {proxy} non ha effettuato il login entro 60s. Terminazione.")
+            if self.process.returncode is None:
+                self.process.terminate()
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+                except:
+                    self.process.kill()
+                    await self.process.wait()
             return 1
 
     async def monitor_output(self):
@@ -73,7 +74,7 @@ class BotSupervisor:
                 line_str = line.decode().strip()
                 if name == 'stdout':
                     logger.info(f"[BOT] {line_str}")
-                    if "Bot online as" in line_str:   # <-- modifica qui
+                    if "Bot online as" in line_str:
                         self.login_detected.set()
                 else:
                     logger.info(f"[BOT] {line_str}")
