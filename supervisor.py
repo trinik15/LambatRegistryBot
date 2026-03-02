@@ -40,7 +40,7 @@ class BotSupervisor:
         self.proxy_failures = {}  # proxy -> numero di fallimenti consecutivi
 
     async def start_bot(self, proxy):
-        """Avvia il bot con un proxy specifico."""
+        """Avvia il bot con un proxy specifico e impone un timeout di 60 secondi."""
         env = os.environ.copy()
         env["PROXY_URL"] = f"http://{proxy}"
         logger.info(f"Avvio bot con proxy {proxy}")
@@ -51,6 +51,19 @@ class BotSupervisor:
             stderr=asyncio.subprocess.PIPE
         )
         asyncio.create_task(self.log_output())
+        try:
+            return_code = await asyncio.wait_for(self.process.wait(), timeout=60)
+        except asyncio.TimeoutError:
+            logger.error(f"Bot con proxy {proxy} ha impiegato troppo tempo (60s). Terminazione forzata.")
+            self.process.terminate()
+            try:
+                await asyncio.wait_for(self.process.wait(), timeout=5)
+            except:
+                self.process.kill()
+                await self.process.wait()
+            return 1  # codice di errore generico
+        else:
+            return return_code
 
     async def log_output(self):
         """Legge stdout/stderr e li logga."""
@@ -80,8 +93,8 @@ class BotSupervisor:
                 if self.current_proxy not in self.proxy_failures:
                     self.proxy_failures[self.current_proxy] = 0
 
-                await self.start_bot(self.current_proxy)
-                return_code = await self.process.wait()
+                # Avvia il bot e ottieni il codice di uscita
+                return_code = await self.start_bot(self.current_proxy)
 
                 if return_code == 429:
                     logger.error(f"Proxy {self.current_proxy} bannato (429).")
