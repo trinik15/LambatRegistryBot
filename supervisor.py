@@ -50,23 +50,21 @@ class BotSupervisor:
         self.login_detected.clear()
         asyncio.create_task(self.monitor_output())
         try:
-            await asyncio.wait_for(self.login_detected.wait(), timeout=60)
+            await asyncio.wait_for(self.login_detected.wait(), timeout=30)  # ridotto a 30 secondi
             logger.info(f"Bot con proxy {proxy} ha effettuato il login con successo.")
-            # Ora attendiamo che il bot termini (potrebbe non terminare mai)
             return_code = await self.process.wait()
             return return_code
         except asyncio.TimeoutError:
-            logger.error(f"Bot con proxy {proxy} non ha effettuato il login entro 60s. Terminazione.")
+            logger.error(f"Bot con proxy {proxy} non ha effettuato il login entro 30s. Terminazione.")
             self.process.terminate()
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=5)
             except:
                 self.process.kill()
                 await self.process.wait()
-            return 1  # codice errore
+            return 1
 
     async def monitor_output(self):
-        """Legge stdout e stderr e rileva la stringa di login."""
         async def read_stream(stream, name):
             while True:
                 line = await stream.readline()
@@ -75,10 +73,9 @@ class BotSupervisor:
                 line_str = line.decode().strip()
                 if name == 'stdout':
                     logger.info(f"[BOT] {line_str}")
-                    if "Logged in as" in line_str:
+                    if "Bot online as" in line_str:   # <-- modifica qui
                         self.login_detected.set()
                 else:
-                    # stderr lo logghiamo come INFO per evitare confusione
                     logger.info(f"[BOT] {line_str}")
         await asyncio.gather(
             read_stream(self.process.stdout, 'stdout'),
