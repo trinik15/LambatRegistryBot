@@ -14,9 +14,8 @@ from core.config import Config
 from core import database as db
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
-# from web.http_keepalive import start_http_server  # Disabilitato per evitare conflitti
+# from web.http_keepalive import start_http_server  # Disabilitato
 
-# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -27,19 +26,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Variabili per il monitoraggio dei rate limit
 rate_limit_errors = deque(maxlen=10)
 last_rate_limit_reset = time.time()
 
 def check_rate_limit_exit():
-    """Se troppi 429 in poco tempo, esce con codice 429."""
     global rate_limit_errors, last_rate_limit_reset
     now = time.time()
-    # Resetta se è passata più di un'ora
     if now - last_rate_limit_reset > 3600:
         rate_limit_errors.clear()
         last_rate_limit_reset = now
-    # Se più di 3 errori in 10 minuti, esci
     if len(rate_limit_errors) >= 3 and (now - rate_limit_errors[0]) < 600:
         logger.critical("Troppi rate limit (429) in breve tempo. Uscita per cambio proxy.")
         sys.exit(429)
@@ -49,10 +44,7 @@ class PaviaBot(commands.Bot):
         intents = discord.Intents.default()
         intents.members = True
         intents.message_content = True
-
-        # Legge il proxy dalle variabili d'ambiente (se presente)
         proxy_url = os.getenv("PROXY_URL")
-
         super().__init__(
             command_prefix="!",
             intents=intents,
@@ -64,7 +56,9 @@ class PaviaBot(commands.Bot):
 
     async def setup_hook(self):
         await db.init_db()
-        self.http_session = aiohttp.ClientSession()
+        # Imposta timeout ridotti per le connessioni HTTP
+        timeout = aiohttp.ClientTimeout(total=5, connect=3)   # <-- aggiunto
+        self.http_session = aiohttp.ClientSession(timeout=timeout)
         self.activity_monitor = ActivityMonitor(self)
 
         for filename in os.listdir("cogs"):
@@ -85,7 +79,6 @@ class PaviaBot(commands.Bot):
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         logger.error(f"Unhandled app command error in {interaction.command}: {error}\n{traceback.format_exc()}")
         if isinstance(error, discord.HTTPException) and error.status == 429:
-            # Registra l'errore per il monitoraggio
             rate_limit_errors.append(time.time())
             check_rate_limit_exit()
             embed = discord.Embed(
@@ -129,7 +122,6 @@ class PaviaBot(commands.Bot):
         await super().close()
 
 async def run_bot():
-    """Avvia il bot con retry in caso di rate limiting."""
     max_retries = 5
     retry_delay = 5
 
@@ -142,7 +134,7 @@ async def run_bot():
             bot.daily_backup.start()
             bot.activity_monitor.daily_check.start()
             print(f"✅ Bot online as {bot.user}")
-            await asyncio.Future()  # Attende indefinitamente
+            await asyncio.Future()
         except discord.HTTPException as e:
             if e.status == 429:
                 if attempt < max_retries - 1:
@@ -153,7 +145,7 @@ async def run_bot():
                 else:
                     logger.critical("Login fallito per 429 dopo tutti i tentativi. Uscita con codice 429.")
                     await bot.close()
-                    sys.exit(429)  # Esce con codice 429 per il supervisor
+                    sys.exit(429)
             else:
                 logger.error(f"Fatal HTTP error during login: {e}")
                 await bot.close()
@@ -166,5 +158,5 @@ async def run_bot():
             await bot.close()
 
 if __name__ == "__main__":
-    # start_http_server()  # Disabilitato per evitare conflitti con riavvii frequenti
+    # start_http_server()  # Disabilitato
     asyncio.run(run_bot())
