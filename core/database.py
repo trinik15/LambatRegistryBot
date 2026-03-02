@@ -64,6 +64,18 @@ async def init_db():
             FOREIGN KEY (ign) REFERENCES citizens(ign) ON DELETE CASCADE
         )
     """)
+    # Nuova tabella per snapshot mensili
+    await execute_query("""
+        CREATE TABLE IF NOT EXISTS monthly_snapshots (
+            id SERIAL PRIMARY KEY,
+            snapshot_date DATE NOT NULL,
+            duchy TEXT,
+            district TEXT,
+            total INTEGER NOT NULL,
+            active INTEGER NOT NULL,
+            UNIQUE(snapshot_date, duchy, district)
+        )
+    """)
     await execute_query("CREATE INDEX IF NOT EXISTS idx_citizens_settlement ON citizens(settlement)")
     await execute_query("CREATE INDEX IF NOT EXISTS idx_citizens_discord ON citizens(discord_id)")
     logger.info("Database PostgreSQL inizializzato.")
@@ -79,4 +91,5 @@ async def reset_db():
             await conn.execute("DELETE FROM activity_cache;")
             await conn.execute("DELETE FROM citizens;")
             await conn.execute("DELETE FROM settlements;")
+            await conn.execute("DELETE FROM monthly_snapshots;")  # aggiunto per completezza
     logger.info("Database resettato: tutte le tabelle sono state svuotate.")
