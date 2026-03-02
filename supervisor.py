@@ -11,7 +11,6 @@ from proxy_manager import ProxyManager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Supervisor")
 
-# ===== Server HTTP keepalive per Render =====
 PORT = int(os.environ.get('PORT', 10000))
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -27,9 +26,7 @@ def run_http_server():
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         httpd.serve_forever()
 
-# Avvia il server in un thread daemon
 threading.Thread(target=run_http_server, daemon=True).start()
-# ============================================
 
 class BotSupervisor:
     def __init__(self):
@@ -37,10 +34,10 @@ class BotSupervisor:
         self.current_proxy = None
         self.process = None
         self.restart_delay = 1
-        self.proxy_failures = {}  # proxy -> numero di fallimenti consecutivi
+        self.proxy_failures = {}
+        self.login_detected = asyncio.Event()
 
     async def start_bot(self, proxy):
-        """Avvia il bot con un proxy specifico e impone un timeout di 60 secondi."""
         env = os.environ.copy()
         env["PROXY_URL"] = f"http://{proxy}"
         logger.info(f"Avvio bot con proxy {proxy}")
@@ -50,36 +47,45 @@ class BotSupervisor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        asyncio.create_task(self.log_output())
+        self.login_detected.clear()
+        asyncio.create_task(self.monitor_output())
         try:
-            return_code = await asyncio.wait_for(self.process.wait(), timeout=60)
+            await asyncio.wait_for(self.login_detected.wait(), timeout=60)
+            logger.info(f"Bot con proxy {proxy} ha effettuato il login con successo.")
+            # Ora attendiamo che il bot termini (potrebbe non terminare mai)
+            return_code = await self.process.wait()
+            return return_code
         except asyncio.TimeoutError:
-            logger.error(f"Bot con proxy {proxy} ha impiegato troppo tempo (60s). Terminazione forzata.")
+            logger.error(f"Bot con proxy {proxy} non ha effettuato il login entro 60s. Terminazione.")
             self.process.terminate()
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=5)
             except:
                 self.process.kill()
                 await self.process.wait()
-            return 1  # codice di errore generico
-        else:
-            return return_code
+            return 1  # codice errore
 
-    async def log_output(self):
-        """Legge stdout/stderr e li logga."""
-        while True:
-            line = await self.process.stdout.readline()
-            if not line:
-                break
-            logger.info(f"[BOT] {line.decode().strip()}")
-        while True:
-            line = await self.process.stderr.readline()
-            if not line:
-                break
-            logger.info(f"[BOT] {line.decode().strip()}")  # Usiamo INFO per evitare confusione
+    async def monitor_output(self):
+        """Legge stdout e stderr e rileva la stringa di login."""
+        async def read_stream(stream, name):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                line_str = line.decode().strip()
+                if name == 'stdout':
+                    logger.info(f"[BOT] {line_str}")
+                    if "Logged in as" in line_str:
+                        self.login_detected.set()
+                else:
+                    # stderr lo logghiamo come INFO per evitare confusione
+                    logger.info(f"[BOT] {line_str}")
+        await asyncio.gather(
+            read_stream(self.process.stdout, 'stdout'),
+            read_stream(self.process.stderr, 'stderr')
+        )
 
     async def run(self):
-        """Ciclo principale del supervisor."""
         async with self.proxy_manager:
             asyncio.create_task(self.proxy_manager.run_periodic_update())
 
@@ -93,7 +99,6 @@ class BotSupervisor:
                 if self.current_proxy not in self.proxy_failures:
                     self.proxy_failures[self.current_proxy] = 0
 
-                # Avvia il bot e ottieni il codice di uscita
                 return_code = await self.start_bot(self.current_proxy)
 
                 if return_code == 429:
