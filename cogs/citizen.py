@@ -462,7 +462,8 @@ class CitizenRemoveConfirm(discord.ui.View):
         self.cog.autocomplete_cache._citizen_cache["timestamp"] = 0
 
         await interaction.delete_original_response()
-        await interaction.followup.send(f"🗑️ Citizen **{self.ign}** has been removed.", ephemeral=True)
+        # Public message (ephemeral=False)
+        await interaction.followup.send(f"🗑️ Citizen **{self.ign}** has been removed.", ephemeral=False)
         logger.info(f"Citizen {self.ign} removed by {interaction.user}")
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
