@@ -100,9 +100,17 @@ async def run_bot():
         await bot.start(Config.DISCORD_TOKEN)
         await bot.wait_until_ready()
         logger.info(f"Logged in as {bot.user}")
-        bot.daily_backup.start()
-        bot.activity_monitor.daily_check.start()
-        logger.info(f"🟢 daily_check started: {bot.activity_monitor.daily_check.is_running()}")  # NUOVO LOG
+        
+        # Avvio dei task con gestione errori
+        try:
+            bot.daily_backup.start()
+            bot.activity_monitor.daily_check.start()
+            logger.info(f"🟢 daily_check started: {bot.activity_monitor.daily_check.is_running()}")
+        except Exception as e:
+            logger.error(f"❌ Failed to start daily_check: {e}")
+            import traceback
+            traceback.print_exc()
+        
         print(f"✅ Bot online as {bot.user}")
         await asyncio.Future()  # run forever
     except Exception as e:
