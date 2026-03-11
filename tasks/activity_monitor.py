@@ -33,9 +33,11 @@ SETTLEMENT_TO_DUCHY = {
 class ActivityMonitor:
     def __init__(self, bot):
         self.bot = bot
+        logger.info("🟢 ActivityMonitor INITIALIZED")  # NUOVO LOG
 
     @tasks.loop(hours=24)
     async def daily_check(self):
+        logger.info("🟡 daily_check LOOP ENTERED")  # NUOVO LOG
         await self.bot.wait_until_ready()
         logger.info("Starting daily activity check")
 
@@ -53,20 +55,23 @@ class ActivityMonitor:
 
         # 2. Se è il primo del mese → genera report mensile
         if True: # forced test - replace with today.day == 1 after test
+            logger.info("🔵 Generating monthly report (forced)")  # NUOVO LOG
             await self.generate_monthly_report()
 
         logger.info("Daily activity check completed")
 
     @daily_check.before_loop
     async def before_daily_check(self):
+        logger.info("🟠 before_daily_check CALLED")  # NUOVO LOG
         await self.bot.wait_until_ready()
         now = datetime.now()
         target = now.replace(hour=20, minute=37, second=0, microsecond=0)  # tra 5 minuti
         if now > target:
             target += timedelta(days=1)
         wait_seconds = (target - now).total_seconds()
-        logger.info(f"daily_check: waiting {wait_seconds} seconds until {target}")
-        await asyncio.sleep((target - now).total_seconds())
+        logger.info(f"⏳ daily_check: waiting {wait_seconds:.0f} seconds until {target}")
+        await asyncio.sleep(wait_seconds)
+        logger.info("⏰ Wait finished, starting daily_check")  # NUOVO LOG
 
     async def generate_monthly_report(self):
         """Genera e invia il report mensile dettagliato nel canale census."""
