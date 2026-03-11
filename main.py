@@ -102,6 +102,7 @@ async def run_bot():
         logger.info(f"Logged in as {bot.user}")
         bot.daily_backup.start()
         bot.activity_monitor.daily_check.start()
+        logger.info(f"🟢 daily_check started: {bot.activity_monitor.daily_check.is_running()}")  # NUOVO LOG
         print(f"✅ Bot online as {bot.user}")
         await asyncio.Future()  # run forever
     except Exception as e:
