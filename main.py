@@ -42,6 +42,7 @@ class PaviaBot(commands.Bot):
         timeout = aiohttp.ClientTimeout(total=5, connect=3)
         self.http_session = aiohttp.ClientSession(timeout=timeout)
         self.activity_monitor = ActivityMonitor(self)
+        logger.info("🔧 ActivityMonitor assigned in setup_hook")  # NUOVO LOG
 
         for filename in os.listdir("cogs"):
             if filename.endswith(".py") and not filename.startswith("__"):
@@ -101,11 +102,24 @@ async def run_bot():
         await bot.wait_until_ready()
         logger.info(f"Logged in as {bot.user}")
         
+        # DEBUG ULTIMATIVO - Controlla se activity_monitor esiste
+        logger.info(f"🔍 activity_monitor exists: {bot.activity_monitor is not None}")
+        if bot.activity_monitor:
+            logger.info(f"🔍 daily_check task exists: {hasattr(bot.activity_monitor, 'daily_check')}")
+            logger.info(f"🔍 daily_check is running before start: {bot.activity_monitor.daily_check.is_running() if hasattr(bot.activity_monitor, 'daily_check') else 'N/A'}")
+        else:
+            logger.error("❌ activity_monitor is None! Check setup_hook")
+        
         # Avvio dei task con gestione errori
         try:
             bot.daily_backup.start()
-            bot.activity_monitor.daily_check.start()
-            logger.info(f"🟢 daily_check started: {bot.activity_monitor.daily_check.is_running()}")
+            logger.info("✅ daily_backup started")
+            
+            if bot.activity_monitor and hasattr(bot.activity_monitor, 'daily_check'):
+                bot.activity_monitor.daily_check.start()
+                logger.info(f"🟢 daily_check started: {bot.activity_monitor.daily_check.is_running()}")
+            else:
+                logger.error("❌ Cannot start daily_check: activity_monitor or daily_check missing")
         except Exception as e:
             logger.error(f"❌ Failed to start daily_check: {e}")
             import traceback
