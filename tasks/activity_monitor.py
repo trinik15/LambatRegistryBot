@@ -59,8 +59,8 @@ class ActivityMonitor:
 
     @daily_check.before_loop
     async def before_daily_check(self):
-        logger.info(f"daily_check eseguito alle {datetime.now()}")
         await self.bot.wait_until_ready()
+        logger.info(f"daily_check eseguito alle {datetime.now()}")
         now = datetime.now()
         target = now.replace(hour=20, minute=28, second=0, microsecond=0)  # tra 5 minuti
         if now > target:
