@@ -71,7 +71,7 @@ class ActivityMonitor:
             logger.info("🟠 before_daily_check CALLED")  # NUOVO LOG
             await self.bot.wait_until_ready()
             now = datetime.now()
-            target = now.replace(hour=21, minute=23, second=0, microsecond=0)  # modifica l'ora
+            target = now.replace(hour=21, minute=56, second=0, microsecond=0)  # modifica l'ora
             if now > target:
                 target += timedelta(days=1)
             wait_seconds = (target - now).total_seconds()
