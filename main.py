@@ -48,6 +48,13 @@ class PaviaBot(commands.Bot):
         self.http_session = aiohttp.ClientSession(timeout=timeout)
         self.activity_monitor = ActivityMonitor(self)
         logger.info("🔧 ActivityMonitor assigned in setup_hook")
+        
+        # 🔴 Avvio daily_check SUBITO dopo averlo creato
+        if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
+            self.activity_monitor.daily_check.start()
+            logger.info(f"🟢 daily_check started from setup_hook: {self.activity_monitor.daily_check.is_running()}")
+        else:
+            logger.error("❌ Cannot start daily_check in setup_hook")
 
         for filename in os.listdir("cogs"):
             if filename.endswith(".py") and not filename.startswith("__"):
@@ -107,18 +114,11 @@ async def run_bot():
     
     bot = PaviaBot()
     
-    # 🔴 Avvio i task PRIMA di bot.start() – ora funzionerà!
+    # daily_backup può partire subito
     logger.info("🔴 Avvio daily_backup.start()")
     bot.daily_backup.start()
     
-    logger.info("🔴 Avvio daily_check.start()")
-    if bot.activity_monitor and hasattr(bot.activity_monitor, 'daily_check'):
-        bot.activity_monitor.daily_check.start()
-        logger.info(f"🟢 daily_check started: {bot.activity_monitor.daily_check.is_running()}")
-    else:
-        logger.error("❌ Cannot start daily_check: activity_monitor missing")
-    
-    logger.info("🔴 Avvio bot.start() – ora il bot parte e i task girano in background")
+    logger.info("🔴 Avvio bot.start() – ora il bot parte e daily_check parte da setup_hook")
     
     try:
         await bot.start(Config.DISCORD_TOKEN)  # questo blocca per sempre
