@@ -60,11 +60,12 @@ class ActivityMonitor:
     @daily_check.before_loop
     async def before_daily_check(self):
         await self.bot.wait_until_ready()
-        logger.info(f"daily_check eseguito alle {datetime.now()}")
         now = datetime.now()
-        target = now.replace(hour=20, minute=28, second=0, microsecond=0)  # tra 5 minuti
+        target = now.replace(hour=20, minute=37, second=0, microsecond=0)  # tra 5 minuti
         if now > target:
             target += timedelta(days=1)
+        wait_seconds = (target - now).total_seconds()
+        logger.info(f"daily_check: waiting {wait_seconds} seconds until {target}")
         await asyncio.sleep((target - now).total_seconds())
 
     async def generate_monthly_report(self):
