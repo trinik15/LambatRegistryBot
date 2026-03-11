@@ -33,11 +33,11 @@ SETTLEMENT_TO_DUCHY = {
 class ActivityMonitor:
     def __init__(self, bot):
         self.bot = bot
-        logger.info("🟢 ActivityMonitor INITIALIZED")  # NUOVO LOG
+        logger.info("🟢 ActivityMonitor INITIALIZED")
 
     @tasks.loop(hours=24)
     async def daily_check(self):
-        logger.info("🟡 daily_check LOOP ENTERED")  # NUOVO LOG
+        logger.info("🟡 daily_check LOOP ENTERED")
         try:
             await self.bot.wait_until_ready()
             logger.info("Starting daily activity check")
@@ -56,7 +56,7 @@ class ActivityMonitor:
 
             # 2. Se è il primo del mese → genera report mensile
             if True: # forced test - replace with today.day == 1 after test
-                logger.info("🔵 Generating monthly report (forced)")  # NUOVO LOG
+                logger.info("🔵 Generating monthly report (forced)")
                 await self.generate_monthly_report()
 
             logger.info("Daily activity check completed")
@@ -68,7 +68,7 @@ class ActivityMonitor:
     @daily_check.before_loop
     async def before_daily_check(self):
         try:
-            logger.info("🟠 before_daily_check CALLED")  # NUOVO LOG
+            logger.info("🟠 before_daily_check CALLED")
             await self.bot.wait_until_ready()
             now = datetime.now()
             target = now.replace(hour=22, minute=7, second=0, microsecond=0)  # modifica l'ora
@@ -77,7 +77,7 @@ class ActivityMonitor:
             wait_seconds = (target - now).total_seconds()
             logger.info(f"⏳ daily_check: waiting {wait_seconds:.0f} seconds until {target}")
             await asyncio.sleep(wait_seconds)
-            logger.info("⏰ Wait finished, starting daily_check")  # NUOVO LOG
+            logger.info("⏰ Wait finished, starting daily_check")
         except Exception as e:
             logger.error(f"❌ Error in before_daily_check: {e}")
             import traceback
@@ -90,7 +90,7 @@ class ActivityMonitor:
         today = datetime.now()
         # Data dell'ultimo giorno del mese precedente (es. se oggi è 1 marzo, last_month = 28/29 febbraio)
         last_month = today.replace(day=1) - timedelta(days=1)
-        last_month_str = last_month.strftime("%Y-%m-%d")
+        last_month_date = last_month.date()  # 👈 usa oggetto date
         month_name = last_month.strftime("%B %Y")  # Nome del mese passato (es. "February 2026")
 
         citizens = await db.execute_query(
@@ -125,7 +125,7 @@ class ActivityMonitor:
         # Carica snapshot del mese precedente
         old_snapshots = await db.execute_query(
             "SELECT duchy, district, total, active FROM monthly_snapshots WHERE snapshot_date = $1",
-            (last_month_str,),
+            (last_month_date,),  # 👈 ora è un oggetto date
             fetch_all=True
         )
         old_province = {}
@@ -249,7 +249,7 @@ class ActivityMonitor:
             logger.error("Census channel not found")
 
         # Salva snapshot corrente
-        snapshot_date = today.strftime("%Y-%m-%d")
+        snapshot_date = today.date()  # 👈 oggetto date
         await db.execute_query("DELETE FROM monthly_snapshots WHERE snapshot_date = $1", (snapshot_date,))
 
         for duchy, total in province_totals.items():
