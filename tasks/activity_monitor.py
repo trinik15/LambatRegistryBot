@@ -61,7 +61,7 @@ class ActivityMonitor:
     async def before_daily_check(self):
         await self.bot.wait_until_ready()
         now = datetime.now()
-        target = now.replace(hour=16, minute=5, second=0, microsecond=0)  # tra 5 minuti
+        target = now.replace(hour=20, minute=20, second=0, microsecond=0)  # tra 5 minuti
         if now > target:
             target += timedelta(days=1)
         await asyncio.sleep((target - now).total_seconds())
