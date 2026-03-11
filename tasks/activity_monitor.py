@@ -218,7 +218,7 @@ class ActivityMonitor:
         lines.append("<@&1067779118030143549>")  # ping ruolo council
 
         # Invio nel canale census
-        channel = self.bot.get_channel(984252248441913374)
+        channel = self.bot.get_channel(1477763652731015209)
         if channel:
             full_message = "\n".join(lines)
             if len(full_message) <= 2000:
