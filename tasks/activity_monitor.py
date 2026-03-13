@@ -10,7 +10,7 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
-# Mappa distretto -> provincia (duchy) – da completare in base ai dati reali
+# Mappa distretto -> provincia (duchy)
 SETTLEMENT_TO_DUCHY = {
     "New September": "Lambat City",
     "Pioneer": "Lambat City",
@@ -27,7 +27,6 @@ SETTLEMENT_TO_DUCHY = {
     "Tierra del Cabo": "Capeland",
     "Margaritaville": "Margaritaville",
     "Pampang": "San Canela",
-    # Aggiungi altri se necessario
 }
 
 class ActivityMonitor:
@@ -55,8 +54,8 @@ class ActivityMonitor:
                 await asyncio.sleep(0.5)
 
             # 2. Se è il primo del mese → genera report mensile
-            if True: # forced test - replace with today.day == 1 after test
-                logger.info("🔵 Generating monthly report (forced)")
+            if today.day == 1:   # solo il primo giorno del mese
+                logger.info("🔵 Generating monthly report")
                 await self.generate_monthly_report()
 
             logger.info("Daily activity check completed")
@@ -71,7 +70,8 @@ class ActivityMonitor:
             logger.info("🟠 before_daily_check CALLED")
             await self.bot.wait_until_ready()
             now = datetime.now()
-            target = now.replace(hour=0, minute=46, second=0, microsecond=0)  # modifica l'ora
+            # Esegui il daily_check ogni giorno alle 2:00 (ora del server)
+            target = now.replace(hour=2, minute=0, second=0, microsecond=0)
             if now > target:
                 target += timedelta(days=1)
             wait_seconds = (target - now).total_seconds()
@@ -90,7 +90,7 @@ class ActivityMonitor:
         today = datetime.now()
         # Data dell'ultimo giorno del mese precedente (es. se oggi è 1 marzo, last_month = 28/29 febbraio)
         last_month = today.replace(day=1) - timedelta(days=1)
-        last_month_date = last_month.date()  # 👈 usa oggetto date
+        last_month_date = last_month.date()
         month_name = last_month.strftime("%B %Y")  # Nome del mese passato (es. "February 2026")
 
         citizens = await db.execute_query(
@@ -109,7 +109,7 @@ class ActivityMonitor:
 
         for c in citizens:
             status, emoji, last_login, _ = await civinfo_api.get_player_activity(c["ign"], self.bot.http_session)
-            is_active = (emoji == "🟢")  # consideriamo solo i verdi come attivi per il report
+            is_active = (emoji == "🟢")
 
             district = c["settlement"]
             duchy = SETTLEMENT_TO_DUCHY.get(district, "Unknown")
@@ -125,7 +125,7 @@ class ActivityMonitor:
         # Carica snapshot del mese precedente
         old_snapshots = await db.execute_query(
             "SELECT duchy, district, total, active FROM monthly_snapshots WHERE snapshot_date = $1",
-            (last_month_date,),  # 👈 ora è un oggetto date
+            (last_month_date,),
             fetch_all=True
         )
         old_province = {}
@@ -138,7 +138,7 @@ class ActivityMonitor:
 
         def calc_change(old, new):
             if old == 0:
-                return None, ""  # "new"
+                return None, ""
             pct = (new - old) / old * 100
             arrow = Emojis.UP_ARROW if pct > 0 else Emojis.DOWN_ARROW if pct < 0 else ""
             return round(pct, 2), arrow
@@ -152,7 +152,6 @@ class ActivityMonitor:
         lines.append(f"**Total Registered population (does not account for actual activity):** {total_citizens}\n")
         lines.append(f"**Active population (all players who have logged on within the month)**: {active_citizens} ({round(active_citizens/total_citizens*100, 2)}% of reg. citizens)\n")
 
-        # Variazioni totali se abbiamo dati vecchi
         if old_snapshots:
             old_total = sum(s["total"] for s in old_snapshots if s["district"] is None)
             old_active = sum(s["active"] for s in old_snapshots if s["district"] is None)
@@ -165,7 +164,7 @@ class ActivityMonitor:
         else:
             lines.append("")
 
-        # Nuovi cittadini
+        # Nuovi cittadini (negli ultimi 30 giorni)
         one_month_ago = today - timedelta(days=30)
         new_citizens = 0
         for c in citizens:
@@ -188,7 +187,6 @@ class ActivityMonitor:
             else:
                 change_str = f"({pct}%)" + (f" {arrow}" if arrow else "")
             lines.append(f"{duchy} {emoji} - {total} {change_str}")
-
         lines.append("")
 
         # ACTIVE POPULATION PER PROVINCE
@@ -202,7 +200,6 @@ class ActivityMonitor:
             else:
                 change_str = f"({pct}%)" + (f" {arrow}" if arrow else "")
             lines.append(f"{duchy} {emoji} - {active} {change_str}")
-
         lines.append("")
 
         # POPULATION PER DISTRICT
@@ -216,7 +213,6 @@ class ActivityMonitor:
             else:
                 change_str = f"({pct}%)" + (f" {arrow}" if arrow else "")
             lines.append(f"{district} {emoji} - {total} {change_str}")
-
         lines.append("")
 
         # ACTIVE POPULATION PER DISTRICT
@@ -230,18 +226,32 @@ class ActivityMonitor:
             else:
                 change_str = f"({pct}%)" + (f" {arrow}" if arrow else "")
             lines.append(f"{district} {emoji} - {active} {change_str}")
-
         lines.append("")
+
         lines.append("<@&1067779118030143549>")  # ping ruolo council
 
-        # Invio nel canale census
+        # Invio nel canale census (ID di test, sostituisci con il canale reale quando serve)
         channel = self.bot.get_channel(1477763652731015209)
         if channel:
             full_message = "\n".join(lines)
             if len(full_message) <= 2000:
                 await channel.send(full_message)
             else:
-                parts = [full_message[i:i+1900] for i in range(0, len(full_message), 1900)]
+                # Dividi senza spezzare le righe
+                parts = []
+                current = []
+                current_len = 0
+                for line in lines:
+                    line_len = len(line) + 1  # +1 per il newline che verrà aggiunto
+                    if current_len + line_len > 1900:
+                        parts.append("\n".join(current))
+                        current = [line]
+                        current_len = line_len
+                    else:
+                        current.append(line)
+                        current_len += line_len
+                if current:
+                    parts.append("\n".join(current))
                 for part in parts:
                     await channel.send(part)
             logger.info("Monthly report sent")
@@ -249,18 +259,18 @@ class ActivityMonitor:
             logger.error("Census channel not found")
 
         # Salva snapshot corrente
-        snapshot_date = today.date()  # 👈 oggetto date
+        snapshot_date = today.date()
         await db.execute_query("DELETE FROM monthly_snapshots WHERE snapshot_date = $1", (snapshot_date,))
 
         for duchy, total in province_totals.items():
             await db.execute_query(
                 "INSERT INTO monthly_snapshots (snapshot_date, duchy, district, total, active) VALUES ($1, $2, $3, $4, $5)",
-                snapshot_date, duchy, None, total, province_active.get(duchy, 0)
+                (snapshot_date, duchy, None, total, province_active.get(duchy, 0))
             )
         for district, total in district_totals.items():
             duchy = SETTLEMENT_TO_DUCHY.get(district, "Unknown")
             await db.execute_query(
                 "INSERT INTO monthly_snapshots (snapshot_date, duchy, district, total, active) VALUES ($1, $2, $3, $4, $5)",
-                snapshot_date, duchy, district, total, district_active.get(district, 0)
+                (snapshot_date, duchy, district, total, district_active.get(district, 0))
             )
         logger.info("Monthly snapshot saved")
