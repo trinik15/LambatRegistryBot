@@ -86,18 +86,25 @@ class ReportsCog(commands.Cog):
                 data.setdefault(settle, []).append(entry)
 
             embeds = []
-            settlements = list(data.items())
-            items_per_page = 5
-            total_pages = (len(settlements) + items_per_page - 1) // items_per_page
-            for i in range(0, len(settlements), items_per_page):
-                embed = discord.Embed(title="📖 National Census", color=0xED4245)
-                for settle, entries in settlements[i:i+items_per_page]:
-                    value = "\n".join(entries[:8])
-                    if len(entries) > 8:
-                        value += f"\n*...and {len(entries)-8} more*"
-                    embed.add_field(name=f"📍 {settle} ({len(entries)})", value=value[:1024], inline=False)
-                embed.set_footer(text=f"Page {i//items_per_page + 1}/{total_pages} • Total: {len(rows)} citizens")
-                embeds.append(embed)
+            if settlement:
+                entries = data.get(settlement, [])
+                entries_per_page = 8
+                total_citizen_pages = (len(entries) + entries_per_page - 1) // entries_per_page
+                for i in range(0, len(entries), entries_per_page):
+                    embed = discord.Embed(title=f"📖 National Census — {settlement}", color=0xED4245)
+                    embed.description = "\n".join(entries[i:i+entries_per_page])
+                    embed.set_footer(text=f"Page {i//entries_per_page + 1}/{total_citizen_pages} • Total: {len(entries)} citizens")
+                    embeds.append(embed)
+            else:
+                settlements = list(data.items())
+                items_per_page = 5
+                total_pages = (len(settlements) + items_per_page - 1) // items_per_page
+                for i in range(0, len(settlements), items_per_page):
+                    embed = discord.Embed(title="📖 National Census", color=0xED4245)
+                    for settle, entries in settlements[i:i+items_per_page]:
+                        embed.add_field(name=f"📍 {settle} ({len(entries)})", value="\n".join(entries[:8]), inline=False)
+                    embed.set_footer(text=f"Page {i//items_per_page + 1}/{total_pages} • Total: {len(rows)} citizens")
+                    embeds.append(embed)
 
             if len(embeds) == 1:
                 await interaction.followup.send(embed=embeds[0])
