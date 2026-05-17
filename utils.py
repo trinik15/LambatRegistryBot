@@ -1,5 +1,8 @@
 import discord
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 def round_up_days(join_date_str: str, format="%d/%m/%Y") -> int:
     """Calculate days since join date, rounding up."""
@@ -19,6 +22,7 @@ def is_valid_date(date_str: str, format="%d/%m/%Y") -> bool:
         return False
 
 def status_emoji_from_days(days_ago: int) -> str:
+    """Get status emoji based on days since last activity."""
     if days_ago < 30:
         return "🟢"
     elif days_ago < 60:
@@ -27,14 +31,17 @@ def status_emoji_from_days(days_ago: int) -> str:
         return "🔴"
 
 def format_discord_user(user_id: str) -> str:
+    """Format Discord user ID as a mention."""
     return f"<@{user_id}>"
 
 def parse_recruiters(recruiter_ids_str: str) -> list:
+    """Parse comma-separated recruiter IDs."""
     if not recruiter_ids_str:
         return []
     return recruiter_ids_str.split(",")
 
 class PaginationView(discord.ui.View):
+    """Pagination view for displaying multiple embeds with navigation buttons."""
     def __init__(self, embeds: list, user_id: int, timeout=60):
         super().__init__(timeout=timeout)
         self.embeds = embeds
@@ -43,10 +50,17 @@ class PaginationView(discord.ui.View):
         self.update_buttons()
 
     def update_buttons(self):
+        """Update button disabled states based on current page."""
         self.children[0].disabled = self.current == 0
         self.children[1].disabled = self.current == 0
         self.children[2].disabled = self.current == len(self.embeds) - 1
         self.children[3].disabled = self.current == len(self.embeds) - 1
+
+    async def on_timeout(self):
+        """Called when the view times out. Disables all buttons."""
+        logger.debug(f"PaginationView timed out for user {self.user_id} at page {self.current}/{len(self.embeds)}")
+        for child in self.children:
+            child.disabled = True
 
     @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.secondary)
     async def first(self, interaction: discord.Interaction, button: discord.ui.Button):
