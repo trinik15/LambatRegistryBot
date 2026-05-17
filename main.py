@@ -6,16 +6,11 @@ import aiohttp
 import traceback
 import asyncio
 from datetime import datetime, timedelta
-import sys
 
 from core.config import Config
 from core import database as db
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
-
-# 🔴🔴🔴 DEBUG 🔴🔴🔴
-print("🚀🚀🚀 MAIN.PY ESEGUITO (stderr) 🚀🚀🚀", file=sys.stderr, flush=True)
-sys.stderr.flush()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,21 +35,23 @@ class PaviaBot(commands.Bot):
         )
         self.http_session = None
         self.activity_monitor = None
-        self.command_semaphore = asyncio.Semaphore(3)
+        self.command_semaphore = asyncio.Semaphore(Config.COMMAND_SEMAPHORE_LIMIT)
 
     async def setup_hook(self):
         await db.init_db()
-        timeout = aiohttp.ClientTimeout(total=5, connect=3)
+        timeout = aiohttp.ClientTimeout(
+            total=Config.AIOHTTP_TOTAL_TIMEOUT,
+            connect=Config.AIOHTTP_CONNECT_TIMEOUT
+        )
         self.http_session = aiohttp.ClientSession(timeout=timeout)
         self.activity_monitor = ActivityMonitor(self)
-        logger.info("🔧 ActivityMonitor assigned in setup_hook")
+        logger.info("ActivityMonitor initialized in setup_hook")
         
-        # 🔴 Avvio daily_check SUBITO dopo averlo creato
         if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
             self.activity_monitor.daily_check.start()
-            logger.info(f"🟢 daily_check started from setup_hook: {self.activity_monitor.daily_check.is_running()}")
+            logger.info(f"daily_check started: {self.activity_monitor.daily_check.is_running()}")
         else:
-            logger.error("❌ Cannot start daily_check in setup_hook")
+            logger.error("Failed to initialize daily_check")
 
         for filename in os.listdir("cogs"):
             if filename.endswith(".py") and not filename.startswith("__"):
@@ -63,7 +60,7 @@ class PaviaBot(commands.Bot):
                     await self.load_extension(f"cogs.{cog_name}")
                     logger.info(f"Loaded cog: {cog_name}")
                 except Exception as e:
-                    logger.error(f"Failed to load cog {cog_name}: {e}")
+                    logger.error(f"Failed to load cog {cog_name}: {e}", exc_info=True)
 
         await self.tree.sync()
         logger.info("All cogs loaded and synced.")
@@ -72,7 +69,7 @@ class PaviaBot(commands.Bot):
         self.tree.on_error = self.on_app_command_error
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        logger.error(f"Unhandled app command error in {interaction.command}: {error}\n{traceback.format_exc()}")
+        logger.error(f"Unhandled app command error in {interaction.command}: {error}", exc_info=True)
         embed = discord.Embed(
             title="❌ Unexpected Error",
             description="An unexpected error occurred. The developers have been notified.",
@@ -83,14 +80,17 @@ class PaviaBot(commands.Bot):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
             else:
                 await interaction.followup.send(embed=embed, ephemeral=True)
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to send error message: {e}", exc_info=True)
 
     @tasks.loop(hours=24)
     async def daily_backup(self):
         await self.wait_until_ready()
-        await backup.create_backup("auto", "daily_scheduled")
-        logger.info("Daily backup created.")
+        try:
+            await backup.create_backup("auto", "daily_scheduled")
+            logger.info("Daily backup created successfully.")
+        except Exception as e:
+            logger.error(f"Failed to create daily backup: {e}", exc_info=True)
 
     @daily_backup.before_loop
     async def before_daily_backup(self):
@@ -108,24 +108,15 @@ class PaviaBot(commands.Bot):
         await super().close()
 
 async def run_bot():
-    # 🔥🔥🔥 DEBUG 🔥🔥🔥
-    print("🔥🔥🔥 RUN_BOT CHIAMATA (stderr) 🔥🔥🔥", file=sys.stderr, flush=True)
-    sys.stderr.flush()
-    
     bot = PaviaBot()
     
-    # daily_backup può partire subito
-    logger.info("🔴 Avvio daily_backup.start()")
+    logger.info("Starting bot...")
     bot.daily_backup.start()
     
-    logger.info("🔴 Avvio bot.start() – ora il bot parte e daily_check parte da setup_hook")
-    
     try:
-        await bot.start(Config.DISCORD_TOKEN)  # questo blocca per sempre
+        await bot.start(Config.DISCORD_TOKEN)
     except Exception as e:
-        logger.error(f"Fatal error during bot.run: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Fatal error during bot startup: {e}", exc_info=True)
     finally:
         await bot.close()
 
