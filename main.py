@@ -6,7 +6,6 @@ import aiohttp
 import traceback
 import asyncio
 from datetime import datetime, timedelta
-
 from core.config import Config
 from core import database as db
 from services import backup
@@ -22,6 +21,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 class PaviaBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -35,7 +35,6 @@ class PaviaBot(commands.Bot):
         )
         self.http_session = None
         self.activity_monitor = None
-        self.command_semaphore = asyncio.Semaphore(Config.COMMAND_SEMAPHORE_LIMIT)
 
     async def setup_hook(self):
         await db.init_db()
@@ -44,15 +43,17 @@ class PaviaBot(commands.Bot):
             connect=Config.AIOHTTP_CONNECT_TIMEOUT
         )
         self.http_session = aiohttp.ClientSession(timeout=timeout)
+
+        # Initialize activity monitor
         self.activity_monitor = ActivityMonitor(self)
         logger.info("ActivityMonitor initialized in setup_hook")
-        
         if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
             self.activity_monitor.daily_check.start()
             logger.info(f"daily_check started: {self.activity_monitor.daily_check.is_running()}")
         else:
             logger.error("Failed to initialize daily_check")
 
+        # Load all cogs
         for filename in os.listdir("cogs"):
             if filename.endswith(".py") and not filename.startswith("__"):
                 cog_name = filename[:-3]
@@ -62,13 +63,39 @@ class PaviaBot(commands.Bot):
                 except Exception as e:
                     logger.error(f"Failed to load cog {cog_name}: {e}", exc_info=True)
 
+        # Sync command tree
         await self.tree.sync()
         logger.info("All cogs loaded and synced.")
         commands_list = [cmd.name for cmd in self.tree.get_commands()]
         logger.info(f"Registered commands: {commands_list}")
+
+        # Set custom error handler for rate limits
         self.tree.on_error = self.on_app_command_error
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+        """Handle application command errors with special handling for rate limits."""
+        # Handle rate limit errors specially
+        if isinstance(error, discord.app_commands.CommandOnCooldown):
+            embed = discord.Embed(
+                title="⏳ Rate Limited",
+                description=f"Please wait **{error.retry_after:.1f} seconds** before using this command again.",
+                color=0xFFCC00
+            )
+            embed.add_field(
+                name="Why?",
+                value="This prevents server overload and ensures fair usage for everyone.",
+                inline=False
+            )
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                else:
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+            except Exception as e:
+                logger.error(f"Failed to send rate limit error message: {e}", exc_info=True)
+            return
+
+        # General error handling for other errors
         logger.error(f"Unhandled app command error in {interaction.command}: {error}", exc_info=True)
         embed = discord.Embed(
             title="❌ Unexpected Error",
@@ -104,21 +131,18 @@ class PaviaBot(commands.Bot):
     async def close(self):
         if self.http_session and not self.http_session.closed:
             await self.http_session.close()
-        await db.close_pool()
         await super().close()
 
-async def run_bot():
+
+async def main():
     bot = PaviaBot()
-    
-    logger.info("Starting bot...")
-    bot.daily_backup.start()
-    
     try:
         await bot.start(Config.DISCORD_TOKEN)
-    except Exception as e:
-        logger.error(f"Fatal error during bot startup: {e}", exc_info=True)
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
     finally:
         await bot.close()
 
+
 if __name__ == "__main__":
-    asyncio.run(run_bot())
+    asyncio.run(main())
