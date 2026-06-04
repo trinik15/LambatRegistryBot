@@ -3,211 +3,208 @@ from discord import app_commands
 from discord.ext import commands
 from core import database as db
 from api import civinfo_api
-import utils
 from core.config import Config
-import io
-import csv
-from collections import Counter
-import asyncio
 import logging
-from datetime import datetime
-from utils import PaginationView
+import csv
+import io
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
+import utils
 
 logger = logging.getLogger(__name__)
 
+
 class ReportsCog(commands.Cog):
-    report_group = app_commands.Group(name="report", description="Reports and statistics")
+    reports_group = app_commands.Group(name="report", description="Population and activity reports")
 
     def __init__(self, bot):
         self.bot = bot
 
-    async def settlement_autocomplete(self, interaction: discord.Interaction, current: str):
-        rows = await db.execute_query(
-            "SELECT name FROM settlements WHERE name LIKE $1 LIMIT 25",
-            (f"{current}%",),
-            fetch_all=True
-        )
-        return [app_commands.Choice(name=r["name"], value=r["name"]) for r in rows]
-
-    def has_full_access(self, interaction):
+    def has_view_access(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == Config.OWNER_ID:
-            return True
-        user_role_ids = [r.id for r in interaction.user.roles]
-        # Controlla se almeno uno dei ruoli dell'utente è nella lista FULL_ACCESS_ROLE_IDS
-        return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
-
-    def has_view_access(self, interaction):
-        if self.has_full_access(interaction):
             return True
         role_ids = [r.id for r in interaction.user.roles]
         return Config.VIEW_ACCESS_ROLE_ID in role_ids
 
-    @report_group.command(name="census", description="Live population report")
+    async def settlement_autocomplete(self, interaction: discord.Interaction, current: str):
+        rows = await db.execute_query("SELECT name FROM settlements ORDER BY name", fetch_all=True)
+        names = [row["name"] for row in rows]
+        filtered = [name for name in names if current.lower() in name.lower()]
+        return [app_commands.Choice(name=name, value=name) for name in filtered[:25]]
+
+    @reports_group.command(name="census", description="Generate population census report")
     @app_commands.autocomplete(settlement=settlement_autocomplete)
-    async def census(self, interaction: discord.Interaction, settlement: str = None):
+    @app_commands.checks.cooldown(1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_census"))
+    async def report_census(self, interaction: discord.Interaction, settlement: Optional[str] = None):
         if not self.has_view_access(interaction):
-            await interaction.response.send_message(
-                "❌ You need the **Nobility** role or higher to view the census.",
-                ephemeral=True
-            )
-            return
+            return await interaction.response.send_message("❌ You don't have permission to view reports.", ephemeral=True)
 
         await interaction.response.defer()
 
-        # Limita concorrenza con semaforo globale
-        async with self.bot.command_semaphore:
-            query = "SELECT ign, settlement, address, discord_id, join_date FROM citizens"
-            params = []
-            if settlement:
-                query += " WHERE settlement = $1"
-                params.append(settlement)
-            query += " ORDER BY settlement, ign"
-
-            rows = await db.execute_query(query, params, fetch_all=True)
-            if not rows:
-                await interaction.followup.send(
-                    "ℹ️ No citizens registered yet. Use `/citizen add` to register the first citizen.",
-                    ephemeral=True
-                )
-                return
-
-            data = {}
-            semaphore = asyncio.Semaphore(10)  # Limita le chiamate API concorrenti
-
-            async def get_entry(r):
-                async with semaphore:
-                    status, emoji, _, _ = await civinfo_api.get_player_activity(r["ign"], self.bot.http_session)
-                return r["settlement"], f"{emoji} **{r['ign']}** (<@{r['discord_id']}>) — {r['address']} | Joined {r['join_date']}"
-
-            tasks = [get_entry(r) for r in rows]
-            results = await asyncio.gather(*tasks)
-
-            for settle, entry in results:
-                data.setdefault(settle, []).append(entry)
-
-            embeds = []
-            if settlement:
-                entries = data.get(settlement, [])
-                entries_per_page = 8
-                total_citizen_pages = (len(entries) + entries_per_page - 1) // entries_per_page
-                for i in range(0, len(entries), entries_per_page):
-                    embed = discord.Embed(title=f"📖 National Census — {settlement}", color=0xED4245)
-                    embed.description = "\n".join(entries[i:i+entries_per_page])
-                    embed.set_footer(text=f"Page {i//entries_per_page + 1}/{total_citizen_pages} • Total: {len(entries)} citizens")
-                    embeds.append(embed)
-            else:
-                settlements = list(data.items())
-                items_per_page = 5
-                total_pages = (len(settlements) + items_per_page - 1) // items_per_page
-                for i in range(0, len(settlements), items_per_page):
-                    embed = discord.Embed(title="📖 National Census", color=0xED4245)
-                    for settle, entries in settlements[i:i+items_per_page]:
-                        embed.add_field(name=f"📍 {settle} ({len(entries)})", value="\n".join(entries[:8]), inline=False)
-                    embed.set_footer(text=f"Page {i//items_per_page + 1}/{total_pages} • Total: {len(rows)} citizens")
-                    embeds.append(embed)
-
-            if len(embeds) == 1:
-                await interaction.followup.send(embed=embeds[0])
-            else:
-                view = PaginationView(embeds, interaction.user.id)
-                await interaction.followup.send(embed=embeds[0], view=view)
-
-    @report_group.command(name="stats", description="Population analytics")
-    @app_commands.autocomplete(settlement=settlement_autocomplete)
-    async def stats(self, interaction: discord.Interaction, settlement: str = None):
-        if not self.has_view_access(interaction):
-            await interaction.response.send_message(
-                "❌ You need the **Nobility** role or higher to view statistics.",
-                ephemeral=True
+        # Build query based on settlement filter
+        if settlement:
+            rows = await db.execute_query(
+                "SELECT ign, settlement, discord_id, join_date FROM citizens WHERE settlement = $1 ORDER BY ign",
+                (settlement,), fetch_all=True
             )
-            return
-
-        await interaction.response.defer()
-
-        async with self.bot.command_semaphore:
-            query = "SELECT ign, recruiter_ids, join_date FROM citizens"
-            params = []
-            if settlement:
-                query += " WHERE settlement = $1"
-                params.append(settlement)
-
-            rows = await db.execute_query(query, params, fetch_all=True)
-            if not rows:
-                await interaction.followup.send(
-                    "ℹ️ No citizens registered yet. Statistics will appear once you add citizens with `/citizen add`.",
-                    ephemeral=True
-                )
-                return
-
-            semaphore = asyncio.Semaphore(10)
-            recruiters = []
-            new_7d = new_30d = 0
-            active = semi = inactive = 0
-            now = datetime.now()
-
-            async def process_row(r):
-                nonlocal active, semi, inactive, new_7d, new_30d
-                async with semaphore:
-                    status, emoji, _, _ = await civinfo_api.get_player_activity(r["ign"], self.bot.http_session)
-                if emoji == "🟢":
-                    active += 1
-                elif emoji == "🟠":
-                    semi += 1
-                else:
-                    inactive += 1
-
-                recruiters.extend([rid for rid in r["recruiter_ids"].split(",") if rid])
-
-                join_date = datetime.strptime(r["join_date"], "%d/%m/%Y")
-                days = (now - join_date).days
-                if days <= 7:
-                    new_7d += 1
-                if days <= 30:
-                    new_30d += 1
-
-            await asyncio.gather(*[process_row(r) for r in rows])
-
-            total = len(rows)
-            embed = discord.Embed(title="📊 Statistics", color=0x57F287)
-            embed.add_field(name="Population", value=f"Total: {total}\n🟢 {active}\n🟠 {semi}\n🔴 {inactive}", inline=True)
-            embed.add_field(name="Recruitment", value=f"Last 7d: {new_7d}\nLast 30d: {new_30d}", inline=True)
-
-            top = Counter(recruiters).most_common(5)
-            if top:
-                lines = [f"{i+1}. <@{rid}> – {count}" for i, (rid, count) in enumerate(top)]
-                embed.add_field(name="Top Recruiters", value="\n".join(lines), inline=False)
-
-            await interaction.followup.send(embed=embed)
-
-    @report_group.command(name="export", description="Export registry as CSV")
-    async def export(self, interaction: discord.Interaction):
-        if not self.has_view_access(interaction):
-            await interaction.response.send_message(
-                "❌ You need the **Nobility** role or higher to export data.",
-                ephemeral=True
+            title = f"📊 Census Report: {settlement}"
+        else:
+            rows = await db.execute_query(
+                "SELECT ign, settlement, discord_id, join_date FROM citizens ORDER BY settlement, ign",
+                fetch_all=True
             )
-            return
+            title = "📊 National Census Report"
 
-        await interaction.response.defer()
-
-        # L'export è un'operazione leggera, quindi non lo mettiamo nel semaforo globale
-        rows = await db.execute_query("SELECT * FROM citizens", fetch_all=True)
         if not rows:
-            await interaction.followup.send(
-                "ℹ️ No data to export. Add citizens with `/citizen add` first.",
-                ephemeral=True
-            )
+            await interaction.followup.send("No citizens found matching the criteria.", ephemeral=True)
             return
 
+        # Group by settlement for display
+        from collections import defaultdict
+        settlements_data = defaultdict(list)
+        for row in rows:
+            settlements_data[row["settlement"]].append(row)
+
+        # Create paginated embeds
+        embeds = []
+        total_citizens = len(rows)
+        processed = 0
+
+        for settlement_name, citizens in settlements_data.items():
+            # Fetch activity status for each citizen (this is expensive - do in batches)
+            activity_data = {}
+            for citizen in citizens:
+                ign = citizen["ign"]
+                status, emoji, last_login, status_text = await civinfo_api.get_player_activity(ign, self.bot.http_session)
+                activity_data[ign] = {"emoji": emoji, "status": status_text}
+
+            active_count = sum(1 for data in activity_data.values() if data["status"] == "Active")
+
+            embed = discord.Embed(
+                title=f"{title} - {settlement_name}",
+                color=0x7289DA
+            )
+
+            citizen_lines = []
+            for citizen in citizens:
+                ign = citizen["ign"]
+                activity = activity_data[ign]
+                citizen_lines.append(f"{activity['emoji']} **{ign}**")
+                if len(citizen_lines) == 20:  # Limit per page
+                    break
+
+            if citizen_lines:
+                embed.add_field(
+                    name=f"Citizens ({len(citizens)})",
+                    value="\n".join(citizen_lines),
+                    inline=True
+                )
+                embed.add_field(
+                    name="Activity",
+                    value=f"🟢 Active: {active_count}\n🔴 Inactive: {len(citizens) - active_count}",
+                    inline=True
+                )
+            else:
+                embed.add_field(name="Citizens", value="None", inline=True)
+
+            processed += len(citizens)
+            embed.set_footer(text=f"Total citizens: {total_citizens} | Showing {processed}/{total_citizens}")
+            embeds.append(embed)
+
+            if len(embeds) >= 25:  # Discord embed limit per message
+                break
+
+        view = utils.PaginationView(embeds, interaction.user, timeout=300)
+        await interaction.followup.send(embed=embeds[0], view=view)
+
+    @reports_group.command(name="stats", description="Show population statistics")
+    @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "report_stats"))
+    async def report_stats(self, interaction: discord.Interaction):
+        if not self.has_view_access(interaction):
+            return await interaction.response.send_message("❌ You don't have permission to view statistics.", ephemeral=True)
+
+        await interaction.response.defer()
+
+        # Get total citizens
+        total_result = await db.execute_query("SELECT COUNT(*) FROM citizens", fetch_one=True)
+        total_citizens = total_result[0] if total_result else 0
+
+        # Get citizens by settlement
+        settlement_stats = await db.execute_query(
+            "SELECT settlement, COUNT(*) FROM citizens GROUP BY settlement ORDER BY COUNT(*) DESC",
+            fetch_all=True
+        )
+
+        # Get total settlements
+        settlement_count = await db.execute_query("SELECT COUNT(*) FROM settlements", fetch_one=True)
+        total_settlements = settlement_count[0] if settlement_count else 0
+
+        # Get recent joins (last 30 days)
+        recent_cutoff = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
+        recent_result = await db.execute_query(
+            "SELECT COUNT(*) FROM citizens WHERE join_date >= $1",
+            (recent_cutoff,), fetch_one=True
+        )
+        recent_joins = recent_result[0] if recent_result else 0
+
+        embed = discord.Embed(
+            title="📈 Population Statistics",
+            color=0x7289DA
+        )
+        embed.add_field(name="Total Citizens", value=str(total_citizens), inline=True)
+        embed.add_field(name="Total Settlements", value=str(total_settlements), inline=True)
+        embed.add_field(name="Recent Joins (30d)", value=str(recent_joins), inline=True)
+
+        if settlement_stats:
+            stats_text = "\n".join(f"• {row['settlement']}: {row['count']}" for row in settlement_stats[:10])
+            if len(settlement_stats) > 10:
+                stats_text += f"\n*and {len(settlement_stats) - 10} more settlements...*"
+            embed.add_field(name="Top Settlements", value=stats_text, inline=False)
+
+        await interaction.followup.send(embed=embed)
+
+    @reports_group.command(name="export", description="Export citizen data as CSV")
+    @app_commands.checks.cooldown(1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_export"))
+    async def report_export(self, interaction: discord.Interaction):
+        if not self.has_view_access(interaction):
+            return await interaction.response.send_message("❌ You don't have permission to export data.", ephemeral=True)
+
+        await interaction.response.defer()
+
+        rows = await db.execute_query(
+            "SELECT ign, discord_id, settlement, join_date, address, mailbox FROM citizens ORDER BY settlement, ign",
+            fetch_all=True
+        )
+
+        if not rows:
+            await interaction.followup.send("No data to export.", ephemeral=True)
+            return
+
+        # Create CSV in memory
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['IGN', 'DiscordID', 'Settlement', 'Recruiters', 'Address', 'Mailbox', 'Notes', 'JoinDate'])
-        for r in rows:
-            writer.writerow([r["ign"], r["discord_id"], r["settlement"], r["recruiter_ids"],
-                             r["address"], r["mailbox"], r["notes"], r["join_date"]])
+        writer.writerow(["IGN", "Discord ID", "Settlement", "Join Date", "Address", "Mailbox"])
+
+        for row in rows:
+            writer.writerow([
+                row["ign"],
+                row["discord_id"],
+                row["settlement"],
+                row["join_date"],
+                row.get("address", ""),
+                row.get("mailbox", "")
+            ])
+
         output.seek(0)
-        file = discord.File(io.BytesIO(output.getvalue().encode()), filename="pavia_registry.csv")
-        await interaction.followup.send("📊 Registry exported.", file=file)
+        file = discord.File(io.BytesIO(output.getvalue().encode()), filename="citizens_export.csv")
+
+        embed = discord.Embed(
+            title="📎 Data Export",
+            description=f"Exported {len(rows)} citizens to CSV.",
+            color=0x43B581
+        )
+        await interaction.followup.send(embed=embed, file=file)
+
 
 async def setup(bot):
     await bot.add_cog(ReportsCog(bot))
