@@ -37,14 +37,53 @@ class AutocompleteCache:
             self._settlement_cache["names"] = [r["name"] for r in rows]
             self._settlement_cache["timestamp"] = now
         return self._settlement_cache["names"]
-    
+
     def invalidate_citizen_cache(self):
         """Invalidate the citizen cache."""
         self._citizen_cache["timestamp"] = 0
-    
+
     def invalidate_settlement_cache(self):
         """Invalidate the settlement cache."""
         self._settlement_cache["timestamp"] = 0
+
+class CitizenRemoveConfirm(discord.ui.View):
+    def __init__(self, cog, ign, discord_id, settlement, requester_id):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.ign = ign
+        self.discord_id = discord_id
+        self.settlement = settlement
+        self.requester_id = requester_id
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.requester_id:
+            return await interaction.response.send_message("You didn't initiate this removal.", ephemeral=True)
+
+        await interaction.response.defer()
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Delete the citizen record
+                await conn.execute("DELETE FROM citizens WHERE ign = $1", self.ign)
+                # Delete from activity cache as well
+                await conn.execute("DELETE FROM activity_cache WHERE ign = $1", self.ign)
+
+        # Role removal
+        member = interaction.guild.get_member(int(self.discord_id))
+        if member:
+            await role_manager.remove_all_citizen_roles(member, self.settlement)
+
+        self.cog.autocomplete_cache.invalidate_citizen_cache()
+        await interaction.followup.send(f"✅ Citizen `{self.ign}` has been removed.", ephemeral=True)
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.requester_id:
+            return await interaction.response.send_message("You didn't initiate this removal.", ephemeral=True)
+        await interaction.response.send_message("Removal cancelled.", ephemeral=True)
+        self.stop()
 
 class CitizenCog(commands.Cog):
     citizen_group = app_commands.Group(name="citizen", description="Citizen management commands")
@@ -81,19 +120,17 @@ class CitizenCog(commands.Cog):
 
     @citizen_group.command(name="add", description="Register a new citizen")
     @app_commands.autocomplete(settlement=settlement_autocomplete)
-    async def citizen_add(
-        self,
-        interaction: discord.Interaction,
-        ign: str,
-        discord_user: discord.Member,
-        settlement: str,
-        recruiter1: discord.Member,
-        address: str,
-        mailbox: str = "Not provided",
-        recruiter2: discord.Member = None,
-        recruiter3: discord.Member = None,
-        notes: str = "None"
-    ):
+    async def citizen_add(self, interaction: discord.Interaction,
+                         ign: str,
+                         discord_user: discord.Member,
+                         settlement: str,
+                         recruiter1: discord.Member,
+                         address: str,
+                         mailbox: str = "Not provided",
+                         recruiter2: discord.Member = None,
+                         recruiter3: discord.Member = None,
+                         notes: str = "None"):
+
         if not self.has_full_access(interaction):
             return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
 
@@ -103,158 +140,113 @@ class CitizenCog(commands.Cog):
 
         await interaction.response.defer()
 
+        # Build recruiter list
+        recruiters = [str(recruiter1.id)]
+        if recruiter2:
+            recruiters.append(str(recruiter2.id))
+        if recruiter3:
+            recruiters.append(str(recruiter3.id))
+        recruiter_ids = ",".join(recruiters)
+        join_date = datetime.now().strftime("%d/%m/%Y")
+
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Check for existing records (still inside transaction)
+                existing_ign = await conn.fetchrow("SELECT discord_id, ign FROM citizens WHERE ign = $1", ign)
+                if existing_ign:
+                    await interaction.followup.send(
+                        f"❌ IGN `{ign}` is already registered to <@{existing_ign['discord_id']}>. "
+                        f"Use `/citizen info {ign}` to view their dossier.", ephemeral=True)
+                    return
+
+                existing_discord = await conn.fetchrow("SELECT ign FROM citizens WHERE discord_id = $1", str(discord_user.id))
+                if existing_discord:
+                    await interaction.followup.send(
+                        f"❌ {discord_user.mention} is already linked to IGN `{existing_discord['ign']}`. "
+                        f"Please choose a different Discord user or update that record instead.", ephemeral=True)
+                    return
+
+                settlement_row = await conn.fetchrow("SELECT name FROM settlements WHERE name = $1", settlement)
+                if not settlement_row:
+                    await interaction.followup.send(
+                        f"❌ Settlement '{settlement}' does not exist. Use `/settlement add {settlement}` to create it first.",
+                        ephemeral=True)
+                    return
+
+                # CivInfo check (API call, but we do it before the DB insert)
+                status, emoji, last_login, status_text = await civinfo_api.get_player_activity(ign, self.bot.http_session)
+                if status == "error":
+                    await interaction.followup.send("❌ CivInfo API is currently unavailable. Please try again later.", ephemeral=True)
+                    return
+                if status == "not_found":
+                    await interaction.followup.send("❌ IGN not found on CivInfo. Please check the name and try again.", ephemeral=True)
+                    return
+
+                # Insert the citizen record
+                await conn.execute(
+                    "INSERT INTO citizens (ign, discord_id, settlement, recruiter_ids, address, mailbox, notes, join_date) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    ign, str(discord_user.id), settlement, recruiter_ids, address, mailbox, notes, join_date
+                )
+
+                # Insert into activity_cache if available
+                if last_login:
+                    await conn.execute(
+                        "INSERT INTO activity_cache (ign, last_login, status) VALUES ($1, $2, $3) "
+                        "ON CONFLICT (ign) DO UPDATE SET last_login = EXCLUDED.last_login, status = EXCLUDED.status, last_checked = CURRENT_TIMESTAMP",
+                        ign, last_login, status
+                    )
+
+        # Role assignment (outside transaction, because it's Discord API)
         try:
-            # Use atomic transaction to prevent race conditions
-            pool = await db.get_pool()
-            async with pool.acquire() as conn:
-                async with conn.transaction():
-                    existing_ign = await conn.fetchrow("SELECT discord_id, ign FROM citizens WHERE ign = $1", ign)
-                    if existing_ign:
-                        await interaction.followup.send(
-                            f"❌ IGN `{ign}` is already registered to <@{existing_ign['discord_id']}>. "
-                            f"Use `/citizen info {ign}` to view their dossier.",
-                            ephemeral=True
-                        )
-                        return
-
-                    existing_discord = await conn.fetchrow("SELECT ign FROM citizens WHERE discord_id = $1", str(discord_user.id))
-                    if existing_discord:
-                        await interaction.followup.send(
-                            f"❌ {discord_user.mention} is already linked to IGN `{existing_discord['ign']}`. "
-                            f"Please choose a different Discord user or update that record instead.",
-                            ephemeral=True
-                        )
-                        return
-
-                    settlement_row = await conn.fetchrow("SELECT name FROM settlements WHERE name = $1", settlement)
-                    if not settlement_row:
-                        await interaction.followup.send(
-                            f"❌ Settlement '{settlement}' does not exist. Use `/settlement add {settlement}` to create it first.",
-                            ephemeral=True
-                        )
-                        return
-
-            # Check CivInfo outside transaction
-            status, emoji, last_login, status_text = await civinfo_api.get_player_activity(ign, self.bot.http_session)
-            if status == "error":
-                await interaction.followup.send(
-                    "❌ CivInfo API is currently unavailable. Please try again later.",
-                    ephemeral=True
-                )
-                return
-            if status == "not_found":
-                await interaction.followup.send(
-                    "❌ IGN not found on CivInfo. Please check the name and try again.",
-                    ephemeral=True
-                )
-                return
-
-            recruiters = [str(recruiter1.id)]
-            if recruiter2:
-                recruiters.append(str(recruiter2.id))
-            if recruiter3:
-                recruiters.append(str(recruiter3.id))
-            recruiter_ids = ",".join(recruiters)
-
-            join_date = datetime.now().strftime("%d/%m/%Y")
-
-            await db.execute_query(
-                "INSERT INTO citizens (ign, discord_id, settlement, recruiter_ids, address, mailbox, notes, join_date) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                (ign, str(discord_user.id), settlement, recruiter_ids, address, mailbox, notes, join_date)
-            )
-
-            try:
-                await role_manager.assign_citizen_roles(discord_user, settlement)
-            except discord.Forbidden:
-                logger.error(f"Failed to assign roles to {discord_user} for citizen {ign}")
-                # Don't fail the whole operation, just log it
-
-            self.autocomplete_cache.invalidate_citizen_cache()
-            self.autocomplete_cache.invalidate_settlement_cache()
-
-            embed = discord.Embed(title="✅ Citizen Registered", color=0x43B581)
-            embed.add_field(name="IGN", value=ign, inline=True)
-            embed.add_field(name="Discord", value=discord_user.mention, inline=True)
-            embed.add_field(name="Settlement", value=settlement, inline=True)
-            embed.add_field(name="Address", value=address, inline=True)
-            embed.add_field(name="Mailbox", value=mailbox, inline=True)
-            recruiter_mentions = ", ".join([f"<@{rid}>" for rid in recruiters])
-            embed.add_field(name="Recruiters", value=recruiter_mentions, inline=True)
-            if notes != "None":
-                embed.add_field(name="Notes", value=notes, inline=False)
-            embed.set_thumbnail(url=self._skin_url(ign))
-            embed.set_footer(text=f"Joined {join_date}")
-
-            await interaction.followup.send(embed=embed)
-            logger.info(f"Citizen {ign} added by {interaction.user} (ID: {interaction.user.id}): settlement={settlement}, recruiters={recruiters}")
+            await role_manager.assign_citizen_roles(discord_user, settlement)
         except Exception as e:
-            logger.error(f"Failed to add citizen {ign}: {e}", exc_info=True)
-            await interaction.followup.send(
-                "❌ An unexpected error occurred while registering the citizen. Please try again.",
-                ephemeral=True
-            )
+            logger.error(f"Failed to assign roles to {discord_user} for citizen {ign}: {e}")
+            # We still committed the DB; the user will need manual role assignment
 
-    @citizen_group.command(name="info", description="View citizen dossier")
-    @app_commands.autocomplete(ign=citizen_autocomplete)
-    async def citizen_info(self, interaction: discord.Interaction, ign: str):
-        if not self.has_view_access(interaction):
-            await interaction.response.send_message("❌ You need the **Nobility** role or higher to view citizen info.", ephemeral=True)
-            return
+        # Invalidate caches
+        self.autocomplete_cache.invalidate_citizen_cache()
+        self.autocomplete_cache.invalidate_settlement_cache()
 
-        await interaction.response.defer()
-
-        row = await db.execute_query("SELECT * FROM citizens WHERE ign = $1", (ign,), fetch_one=True)
-        if not row:
-            await interaction.followup.send(
-                f"❌ No citizen with IGN `{ign}`. Use `/citizen list` to see all registered citizens.",
-                ephemeral=True
-            )
-            return
-
-        status, emoji, last_login, status_text = await civinfo_api.get_player_activity(ign, self.bot.http_session)
-        days = utils.round_up_days(row["join_date"])
-
-        embed = discord.Embed(title=f"📋 Citizen Dossier: {ign}", color=0x5865F2)
+        # Build embed response
+        embed = discord.Embed(title="✅ Citizen Registered", color=0x43B581)
+        embed.add_field(name="IGN", value=ign, inline=True)
+        embed.add_field(name="Discord", value=discord_user.mention, inline=True)
+        embed.add_field(name="Settlement", value=settlement, inline=True)
+        embed.add_field(name="Recruiter 1", value=recruiter1.mention, inline=True)
+        if recruiter2:
+            embed.add_field(name="Recruiter 2", value=recruiter2.mention, inline=True)
+        if recruiter3:
+            embed.add_field(name="Recruiter 3", value=recruiter3.mention, inline=True)
+        embed.add_field(name="Address", value=address, inline=False)
+        embed.add_field(name="Mailbox", value=mailbox, inline=True)
+        embed.add_field(name="Notes", value=notes, inline=False)
+        embed.add_field(name="Join Date", value=join_date, inline=True)
         embed.set_thumbnail(url=self._skin_url(ign))
-        embed.add_field(name="Activity", value=f"{emoji} {status_text}", inline=False)
-        embed.add_field(name="Settlement", value=row["settlement"], inline=True)
-        embed.add_field(name="Address", value=row["address"], inline=True)
-        embed.add_field(name="Mailbox", value=row["mailbox"], inline=True)
-        embed.add_field(name="Discord", value=f"<@{row['discord_id']}>", inline=True)
-        recruiters = ", ".join([f"<@{rid}>" for rid in row["recruiter_ids"].split(",")])
-        embed.add_field(name="Recruiters", value=recruiters, inline=True)
-        embed.add_field(name="Joined", value=row["join_date"], inline=True)
-        embed.add_field(name="Days as Citizen", value=f"{days} days", inline=True)
-        embed.add_field(name="Notes", value=row["notes"] or "None", inline=False)
-
         await interaction.followup.send(embed=embed)
 
     @citizen_group.command(name="update", description="Update citizen info")
     @app_commands.autocomplete(ign=citizen_autocomplete, settlement=settlement_autocomplete)
-    async def citizen_update(
-        self,
-        interaction: discord.Interaction,
-        ign: str,
-        discord_user: discord.Member = None,
-        settlement: str = None,
-        address: str = None,
-        mailbox: str = None,
-        notes: str = None,
-        join_date: str = None,
-        recruiter1: discord.Member = None,
-        recruiter2: discord.Member = None,
-        recruiter3: discord.Member = None
-    ):
+    async def citizen_update(self, interaction: discord.Interaction,
+                            ign: str,
+                            discord_user: discord.Member = None,
+                            settlement: str = None,
+                            address: str = None,
+                            mailbox: str = None,
+                            notes: str = None,
+                            join_date: str = None,
+                            recruiter1: discord.Member = None,
+                            recruiter2: discord.Member = None,
+                            recruiter3: discord.Member = None):
+
         if not self.has_full_access(interaction):
             return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
 
         await interaction.response.defer()
 
-        old_row = await db.execute_query(
-            "SELECT * FROM citizens WHERE ign = $1",
-            (ign,),
-            fetch_one=True
-        )
+        # Fetch the current record
+        old_row = await db.execute_query("SELECT * FROM citizens WHERE ign = $1", (ign,), fetch_one=True)
         if not old_row:
             await interaction.followup.send(f"❌ No citizen with IGN `{ign}`. Use `/citizen list` to see all citizens.", ephemeral=True)
             return
@@ -271,28 +263,24 @@ class CitizenCog(commands.Cog):
         updates = []
         params = []
 
+        # Detect changes
         change_user = discord_user and str(discord_user.id) != old_discord_id
         change_settlement = settlement and settlement != old_settlement
 
         if change_user:
-            conflict = await db.execute_query(
-                "SELECT ign FROM citizens WHERE discord_id = $1 AND ign != $2",
-                (str(discord_user.id), ign),
-                fetch_one=True
-            )
+            conflict = await db.execute_query("SELECT ign FROM citizens WHERE discord_id = $1 AND ign != $2",
+                                             (str(discord_user.id), ign), fetch_one=True)
             if conflict:
-                await interaction.followup.send(
-                    f"❌ {discord_user.mention} is already linked to IGN `{conflict['ign']}`. "
-                    f"Please choose a different Discord user.",
-                    ephemeral=True
-                )
+                await interaction.followup.send(f"❌ {discord_user.mention} is already linked to IGN `{conflict['ign']}`. "
+                                               f"Please choose a different Discord user.", ephemeral=True)
                 return
             updates.append(f"discord_id = ${len(params)+1}")
             params.append(str(discord_user.id))
             changes["Discord"] = (f"<@{old_discord_id}>", discord_user.mention)
 
         if change_settlement:
-            if not await db.execute_query("SELECT name FROM settlements WHERE name = $1", (settlement,), fetch_one=True):
+            settlement_exists = await db.execute_query("SELECT name FROM settlements WHERE name = $1", (settlement,), fetch_one=True)
+            if not settlement_exists:
                 await interaction.followup.send(f"❌ Settlement '{settlement}' not found. Use `/settlement list` to see available settlements.", ephemeral=True)
                 return
             updates.append(f"settlement = ${len(params)+1}")
@@ -316,10 +304,7 @@ class CitizenCog(commands.Cog):
 
         if join_date is not None:
             if not utils.is_valid_date(join_date):
-                await interaction.followup.send(
-                    "❌ Invalid date format. Please use DD/MM/YYYY (e.g., 25/12/2024).",
-                    ephemeral=True
-                )
+                await interaction.followup.send("❌ Invalid date format. Please use DD/MM/YYYY (e.g., 25/12/2024).", ephemeral=True)
                 return
             if join_date != old_join_date:
                 updates.append(f"join_date = ${len(params)+1}")
@@ -338,38 +323,44 @@ class CitizenCog(commands.Cog):
             if new_recruiter_str != old_recruiter_ids:
                 updates.append(f"recruiter_ids = ${len(params)+1}")
                 params.append(new_recruiter_str)
-                changes["Recruiters"] = (
-                    ", ".join([f"<@{rid}>" for rid in old_recruiter_ids.split(",") if rid]),
-                    ", ".join([f"<@{rid}>" for rid in new_recruiters])
-                )
+                changes["Recruiters"] = (", ".join([f"<@{rid}>" for rid in old_recruiter_ids.split(",") if rid]),
+                                        ", ".join([f"<@{rid}>" for rid in new_recruiters]))
 
         if not updates:
-            await interaction.followup.send(
-                "ℹ️ No changes detected. Please specify at least one field to update (e.g., address, settlement, join_date, etc.).",
-                ephemeral=True
-            )
+            await interaction.followup.send("ℹ️ No changes detected. Please specify at least one field to update (e.g., address, settlement, join_date, etc.).", ephemeral=True)
             return
 
+        # Execute the update inside a transaction
         set_clause = ", ".join(updates)
         query = f"UPDATE citizens SET {set_clause} WHERE ign = ${len(params)+1}"
         params.append(ign)
-        await db.execute_query(query, params)
 
-        guild = interaction.guild
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(query, *params)
 
-        if change_user:
-            await role_manager.handle_user_change(guild, old_discord_id, discord_user, old_settlement, settlement)
-        elif change_settlement:
-            await role_manager.handle_settlement_change(guild, old_discord_id, old_settlement, settlement)
-
+        # Invalidate cache
         civinfo_api.cache.cache.pop(ign, None)
         self.autocomplete_cache.invalidate_citizen_cache()
 
+        # Handle role changes (outside transaction)
+        guild = interaction.guild
+        if change_user:
+            old_member = guild.get_member(int(old_discord_id))
+            if old_member:
+                await role_manager.remove_all_citizen_roles(old_member, old_settlement)
+            await role_manager.assign_citizen_roles(discord_user, settlement)
+        elif change_settlement:
+            member = guild.get_member(int(old_discord_id))
+            if member:
+                await role_manager.update_settlement_role(member, old_settlement, settlement)
+
+        # Send response
         embed = discord.Embed(title=f"✅ Updated {ign}", color=0x43B581)
         for field, (old, new) in changes.items():
             embed.add_field(name=field, value=f"~~{old}~~ → **{new}**", inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
-
         logger.info(f"Citizen {ign} updated by {interaction.user} (ID: {interaction.user.id}): {changes}")
 
     @citizen_group.command(name="remove", description="Remove a citizen")
@@ -378,16 +369,9 @@ class CitizenCog(commands.Cog):
         if not self.has_full_access(interaction):
             return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
 
-        row = await db.execute_query(
-            "SELECT discord_id, settlement FROM citizens WHERE ign = $1",
-            (ign,),
-            fetch_one=True
-        )
+        row = await db.execute_query("SELECT discord_id, settlement FROM citizens WHERE ign = $1", (ign,), fetch_one=True)
         if not row:
-            await interaction.response.send_message(
-                f"❌ No citizen with IGN `{ign}`. Use `/citizen list` to see all registered citizens.",
-                ephemeral=True
-            )
+            await interaction.response.send_message(f"❌ No citizen with IGN `{ign}`. Use `/citizen list` to see all registered citizens.", ephemeral=True)
             return
 
         discord_id = row["discord_id"]
@@ -411,89 +395,73 @@ class CitizenCog(commands.Cog):
             return await interaction.response.send_message("❌ You don't have permission to view the citizen list.", ephemeral=True)
 
         await interaction.response.defer()
+        rows = await db.execute_query(
+            "SELECT ign, settlement FROM citizens ORDER BY settlement, ign",
+            fetch_all=True
+        )
 
-        async with self.bot.command_semaphore:
-            rows = await db.execute_query(
-                "SELECT ign, settlement FROM citizens ORDER BY settlement, ign",
-                fetch_all=True
-            )
-            if not rows:
-                await interaction.followup.send(
-                    "ℹ️ No citizens registered yet. Use `/citizen add` to register the first citizen.",
-                    ephemeral=True
-                )
-                return
+        if not rows:
+            await interaction.followup.send("No citizens registered yet.")
+            return
 
-            by_settlement = {}
-            for r in rows:
-                by_settlement.setdefault(r["settlement"], []).append(r["ign"])
+        # Group by settlement
+        settlements = {}
+        for row in rows:
+            settlement = row["settlement"]
+            if settlement not in settlements:
+                settlements[settlement] = []
+            settlements[settlement].append(row["ign"])
 
-            embeds = []
-            items_per_page = 10
-            settlements = list(by_settlement.items())
-            total_pages = (len(settlements) + items_per_page - 1) // items_per_page
-            for i in range(0, len(settlements), items_per_page):
-                embed = discord.Embed(title="👥 National Citizen Roster", color=0xFEE75C)
-                for settle, names in settlements[i:i+items_per_page]:
-                    value = ", ".join(names[:15])
-                    if len(names) > 15:
-                        value += f" … and {len(names)-15} more"
-                    embed.add_field(name=f"📍 {settle} ({len(names)})", value=value, inline=False)
-                embed.set_footer(text=f"Page {i//items_per_page + 1}/{total_pages} • Total: {len(rows)} citizens")
-                embeds.append(embed)
+        embeds = []
+        for settlement, citizens in settlements.items():
+            embed = discord.Embed(title=f"🏘️ {settlement}", color=0x7289DA)
+            citizen_list = "\n".join(citizens)
+            if len(citizen_list) > 1024:
+                citizen_list = citizen_list[:1021] + "..."
+            embed.add_field(name=f"Citizens ({len(citizens)})", value=citizen_list, inline=False)
+            embeds.append(embed)
 
-            if len(embeds) == 1:
-                await interaction.followup.send(embed=embeds[0])
-            else:
-                view = PaginationView(embeds, interaction.user.id)
-                await interaction.followup.send(embed=embeds[0], view=view)
+        view = PaginationView(embeds, interaction.user)
+        await interaction.followup.send(embed=embeds[0], view=view)
+
+    @citizen_group.command(name="dossier", description="Show detailed citizen information")
+    @app_commands.autocomplete(ign=citizen_autocomplete)
+    async def citizen_dossier(self, interaction: discord.Interaction, ign: str):
+        if not self.has_view_access(interaction):
+            return await interaction.response.send_message("❌ You don't have permission to view citizen dossiers.", ephemeral=True)
+
+        await interaction.response.defer()
+
+        row = await db.execute_query(
+            "SELECT * FROM citizens WHERE ign = $1",
+            (ign,), fetch_one=True
+        )
+        if not row:
+            await interaction.followup.send(f"❌ No citizen with IGN `{ign}`.")
+            return
+
+        # Get activity status
+        status, emoji, last_login, status_text = await civinfo_api.get_player_activity(ign, self.bot.http_session)
+
+        # Format recruiter mentions
+        recruiter_ids = row["recruiter_ids"].split(",") if row["recruiter_ids"] else []
+        recruiter_mentions = ", ".join([f"<@{rid}>" for rid in recruiter_ids if rid]) or "None"
+
+        embed = discord.Embed(title=f"📄 Dossier: {ign}", color=0x7289DA)
+        embed.add_field(name="Discord", value=f"<@{row['discord_id']}>", inline=True)
+        embed.add_field(name="Settlement", value=row["settlement"], inline=True)
+        embed.add_field(name="Join Date", value=row["join_date"], inline=True)
+        embed.add_field(name="Address", value=row["address"], inline=False)
+        embed.add_field(name="Mailbox", value=row["mailbox"], inline=True)
+        embed.add_field(name="Recruiters", value=recruiter_mentions, inline=True)
+        embed.add_field(name="Activity", value=f"{emoji} {status_text}", inline=True)
+        if last_login:
+            embed.add_field(name="Last Login", value=last_login, inline=True)
+        if row["notes"] != "None":
+            embed.add_field(name="Notes", value=row["notes"], inline=False)
+        embed.set_thumbnail(url=self._skin_url(ign))
+
+        await interaction.followup.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(CitizenCog(bot))
-
-
-class CitizenRemoveConfirm(discord.ui.View):
-    def __init__(self, cog, ign: str, discord_id: str, settlement: str, user_id: int):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.ign = ign
-        self.discord_id = discord_id
-        self.settlement = settlement
-        self.user_id = user_id
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("You cannot confirm this action.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.confirm.disabled = True
-        self.cancel.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        member = interaction.guild.get_member(int(self.discord_id))
-        if member:
-            try:
-                from services import role_manager
-                await role_manager.remove_all_citizen_roles(member, self.settlement)
-                logger.info(f"Removed roles from {member} for removal of citizen {self.ign}")
-            except discord.Forbidden:
-                logger.error(f"Failed to remove roles from {member} for citizen {self.ign}")
-            except Exception as e:
-                logger.error(f"Unexpected error removing roles from {member}: {e}", exc_info=True)
-        else:
-            logger.warning(f"Member with ID {self.discord_id} not found in server, roles not modified")
-
-        await db.execute_query("DELETE FROM citizens WHERE ign = $1", (self.ign,))
-        civinfo_api.cache.cache.pop(self.ign, None)
-        self.cog.autocomplete_cache.invalidate_citizen_cache()
-
-        await interaction.delete_original_response()
-        await interaction.followup.send(f"🗑️ Citizen **{self.ign}** has been removed.", ephemeral=False)
-        logger.info(f"Citizen {self.ign} removed by {interaction.user} (ID: {interaction.user.id})")
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Removal cancelled.", embed=None, view=None)
