@@ -1,20 +1,18 @@
 import os
 import logging
 import asyncpg
-
 from core.config import Config
 
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = Config.DATABASE_URL
-
 _pool: asyncpg.Pool = None
 
 async def get_pool() -> asyncpg.Pool:
     """Get or create the database connection pool."""
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
     return _pool
 
 async def close_pool():
@@ -24,25 +22,53 @@ async def close_pool():
         await _pool.close()
         _pool = None
 
-async def execute_query(query: str, params: tuple = (), fetch_one: bool = False, fetch_all: bool = False, commit: bool = True):
-    """Execute a database query with error handling."""
+async def execute_query(query: str, params: tuple = (), fetch_one: bool = False,
+                        fetch_all: bool = False, commit: bool = True, connection=None):
+    """
+    Execute a database query with optional transaction control.
+    If a connection is provided, the query runs within that connection's transaction.
+    """
     pool = await get_pool()
-    async with pool.acquire() as conn:
+    if connection:
+        # Use existing connection (caller is managing transaction)
         try:
             if fetch_one:
-                return await conn.fetchrow(query, *params)
+                return await connection.fetchrow(query, *params)
             elif fetch_all:
-                return await conn.fetch(query, *params)
+                return await connection.fetch(query, *params)
             else:
-                result = await conn.execute(query, *params)
+                result = await connection.execute(query, *params)
                 try:
                     return int(result.split()[-1])
-                except (ValueError, IndexError) as e:
-                    logger.warning(f"Could not parse execute result: {result}")
+                except (ValueError, IndexError):
                     return 0
         except Exception as e:
             logger.error(f"Database query failed: {e}", exc_info=True)
             raise
+    else:
+        # Acquire own connection
+        async with pool.acquire() as conn:
+            try:
+                if commit:
+                    async with conn.transaction():
+                        return await _execute_on_conn(conn, query, params, fetch_one, fetch_all)
+                else:
+                    return await _execute_on_conn(conn, query, params, fetch_one, fetch_all)
+            except Exception as e:
+                logger.error(f"Database query failed: {e}", exc_info=True)
+                raise
+
+async def _execute_on_conn(conn, query: str, params: tuple, fetch_one: bool, fetch_all: bool):
+    if fetch_one:
+        return await conn.fetchrow(query, *params)
+    elif fetch_all:
+        return await conn.fetch(query, *params)
+    else:
+        result = await conn.execute(query, *params)
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
 
 async def init_db():
     """Initialize database tables."""
@@ -93,10 +119,7 @@ async def init_db():
         raise
 
 async def reset_db():
-    """
-    Reset the entire database: deletes all data from tables in correct order.
-    Operation is executed in an atomic transaction.
-    """
+    """ Reset the entire database: deletes all data from tables in correct order."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         try:
