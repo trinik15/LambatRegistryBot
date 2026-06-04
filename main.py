@@ -37,14 +37,28 @@ class PaviaBot(commands.Bot):
         self.activity_monitor = None
 
     async def setup_hook(self):
-        await db.init_db()
+        """
+        This is called when the bot is starting up.
+        We initialize the connection pool, database, HTTP session, and load cogs.
+        """
+        # 1. Initialize the database connection pool
+        #    This creates the pool and ensures it's ready before any commands run.
+        try:
+            await db.get_pool()  # Pre-initialize the pool
+            await db.init_db()
+            logger.info("Database connection pool and tables ready.")
+        except Exception as e:
+            logger.critical(f"Failed to initialize database: {e}", exc_info=True)
+            raise
+
+        # 2. Set up HTTP session for CivInfo API
         timeout = aiohttp.ClientTimeout(
             total=Config.AIOHTTP_TOTAL_TIMEOUT,
             connect=Config.AIOHTTP_CONNECT_TIMEOUT
         )
         self.http_session = aiohttp.ClientSession(timeout=timeout)
 
-        # Initialize activity monitor
+        # 3. Initialize activity monitor
         self.activity_monitor = ActivityMonitor(self)
         logger.info("ActivityMonitor initialized in setup_hook")
         if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
@@ -53,7 +67,7 @@ class PaviaBot(commands.Bot):
         else:
             logger.error("Failed to initialize daily_check")
 
-        # Load all cogs
+        # 4. Load all cogs
         for filename in os.listdir("cogs"):
             if filename.endswith(".py") and not filename.startswith("__"):
                 cog_name = filename[:-3]
@@ -63,7 +77,7 @@ class PaviaBot(commands.Bot):
                 except Exception as e:
                     logger.error(f"Failed to load cog {cog_name}: {e}", exc_info=True)
 
-        # Sync command tree
+        # 5. Sync command tree
         await self.tree.sync()
         logger.info("All cogs loaded and synced.")
         commands_list = [cmd.name for cmd in self.tree.get_commands()]
@@ -129,9 +143,28 @@ class PaviaBot(commands.Bot):
         await asyncio.sleep((target - now).total_seconds())
 
     async def close(self):
+        """
+        Gracefully shut down the bot.
+        We close the connection pool, HTTP session, and any other resources.
+        """
+        logger.info("Shutting down bot...")
+
+        # Stop the daily_check loop if it's running
+        if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
+            self.activity_monitor.daily_check.cancel()
+            logger.info("Stopped daily_check loop")
+
+        # Close HTTP session
         if self.http_session and not self.http_session.closed:
             await self.http_session.close()
+            logger.info("Closed HTTP session")
+
+        # Close database connection pool
+        await db.close_pool()
+
+        # Call the parent close method
         await super().close()
+        logger.info("Bot shutdown complete.")
 
 
 async def main():
