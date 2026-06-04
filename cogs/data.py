@@ -1,3 +1,4 @@
+# cogs/data.py
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -17,21 +18,33 @@ class DataCog(commands.Cog):
         self.bot = bot
 
     def has_full_access(self, interaction: discord.Interaction) -> bool:
+        """Check if a user has full access (owner or role-based)."""
+        # Owner has full access
         if interaction.user.id == Config.OWNER_ID:
             return True
+        # Check if user has any of the full access roles
         user_role_ids = [r.id for r in interaction.user.roles]
         return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
 
     async def backup_autocomplete(self, interaction: discord.Interaction, current: str):
+        """Autocomplete for backup filenames."""
         backups = await backup.list_backups()
         filtered = [b for b in backups if current.lower() in b["filename"].lower()]
-        return [app_commands.Choice(name=f"{b['filename']} ({b['created'].strftime('%Y-%m-%d')})", value=b["filename"]) for b in filtered[:25]]
+        return [
+            app_commands.Choice(name=f"{b['filename']} ({b['created'].strftime('%Y-%m-%d')})", value=b["filename"])
+            for b in filtered[:25]
+        ]
 
     @data_group.command(name="backup", description="Create a manual database backup")
     @app_commands.checks.cooldown(1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_backup"))
     async def data_backup(self, interaction: discord.Interaction, note: Optional[str] = None):
+        """Create a manual backup."""
+        # Check full access permission
         if not self.has_full_access(interaction):
-            return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ You need the Council role to use this command.",
+                ephemeral=True
+            )
 
         await interaction.response.defer(ephemeral=True)
 
@@ -45,13 +58,21 @@ class DataCog(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Backup creation failed: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to create backup. Check logs for details.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ Failed to create backup. Check logs for details.",
+                ephemeral=True
+            )
 
     @data_group.command(name="list_backups", description="List all available backups")
     @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "data_list_backups"))
     async def data_list_backups(self, interaction: discord.Interaction):
+        """List all available backups."""
+        # Check full access permission
         if not self.has_full_access(interaction):
-            return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ You need the Council role to use this command.",
+                ephemeral=True
+            )
 
         await interaction.response.defer(ephemeral=True)
 
@@ -84,9 +105,14 @@ class DataCog(commands.Cog):
     @app_commands.autocomplete(filename=backup_autocomplete)
     @app_commands.checks.cooldown(1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_restore"))
     async def data_restore(self, interaction: discord.Interaction, filename: str):
-        # This is a critical operation - only the owner can perform it
-        if interaction.user.id != Config.OWNER_ID:
-            return await interaction.response.send_message("❌ Only the bot owner can restore backups.", ephemeral=True)
+        """Restore database from a backup file."""
+        # Check full access permission (owner or role-based)
+        # This is a critical operation - only users with full access can perform it
+        if not self.has_full_access(interaction):
+            return await interaction.response.send_message(
+                "❌ You need the Council role to use this command.",
+                ephemeral=True
+            )
 
         await interaction.response.defer(ephemeral=True)
 
@@ -95,19 +121,32 @@ class DataCog(commands.Cog):
         backup_exists = any(b["filename"] == filename for b in backups)
 
         if not backup_exists:
-            await interaction.followup.send(f"❌ Backup `{filename}` not found.", ephemeral=True)
+            await interaction.followup.send(
+                f"❌ Backup `{filename}` not found.",
+                ephemeral=True
+            )
             return
 
-        # Send confirmation prompt
+        # Confirmation view - checks full access for both confirm and cancel
         class RestoreConfirm(discord.ui.View):
-            def __init__(self, owner_id):
+            def __init__(self, cog, requester_id):
                 super().__init__(timeout=30)
-                self.owner_id = owner_id
+                self.cog = cog
+                self.requester_id = requester_id
 
             @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
             async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if interaction.user.id != self.owner_id:
-                    return await interaction.response.send_message("You are not authorized.", ephemeral=True)
+                # Verify the user still has full access
+                if not self.cog.has_full_access(interaction):
+                    return await interaction.response.send_message(
+                        "❌ You no longer have permission to restore backups.",
+                        ephemeral=True
+                    )
+                if interaction.user.id != self.requester_id:
+                    return await interaction.response.send_message(
+                        "You did not initiate this restore.",
+                        ephemeral=True
+                    )
 
                 await interaction.response.defer(ephemeral=True)
                 try:
@@ -125,8 +164,17 @@ class DataCog(commands.Cog):
 
             @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
             async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-                if interaction.user.id != self.owner_id:
-                    return await interaction.response.send_message("You are not authorized.", ephemeral=True)
+                # Verify the user still has full access
+                if not self.cog.has_full_access(interaction):
+                    return await interaction.response.send_message(
+                        "❌ You no longer have permission to restore backups.",
+                        ephemeral=True
+                    )
+                if interaction.user.id != self.requester_id:
+                    return await interaction.response.send_message(
+                        "You did not initiate this restore.",
+                        ephemeral=True
+                    )
                 await interaction.response.send_message("Restore cancelled.", ephemeral=True)
                 self.stop()
 
@@ -135,7 +183,7 @@ class DataCog(commands.Cog):
             description=f"Are you sure you want to restore from `{filename}`?\n\nThis will overwrite the current database and cannot be undone.",
             color=0xff9900
         )
-        view = RestoreConfirm(interaction.user.id)
+        view = RestoreConfirm(self, interaction.user.id)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
