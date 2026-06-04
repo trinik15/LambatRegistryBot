@@ -1,271 +1,143 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from core import database as db
-from services import backup
 from core.config import Config
+from services import backup
 import logging
-from datetime import datetime
-import asyncio
+import os
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
 class DataCog(commands.Cog):
-    data_group = app_commands.Group(name="data", description="Data management commands")
+    data_group = app_commands.Group(name="data", description="Data management and backup commands")
 
     def __init__(self, bot):
         self.bot = bot
 
-    def is_owner(self, interaction):
-        return interaction.user.id == Config.OWNER_ID
-
-    def has_full_access(self, interaction):
-        if self.is_owner(interaction):
+    def has_full_access(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == Config.OWNER_ID:
             return True
         user_role_ids = [r.id for r in interaction.user.roles]
         return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
 
-    @data_group.command(name="backup", description="Create a manual backup")
-    async def backup(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+    async def backup_autocomplete(self, interaction: discord.Interaction, current: str):
+        backups = await backup.list_backups()
+        filtered = [b for b in backups if current.lower() in b["filename"].lower()]
+        return [app_commands.Choice(name=f"{b['filename']} ({b['created'].strftime('%Y-%m-%d')})", value=b["filename"]) for b in filtered[:25]]
 
+    @data_group.command(name="backup", description="Create a manual database backup")
+    @app_commands.checks.cooldown(1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_backup"))
+    async def data_backup(self, interaction: discord.Interaction, note: Optional[str] = None):
         if not self.has_full_access(interaction):
-            await interaction.followup.send("❌ You need the Council role to use this command.", ephemeral=True)
-            return
-
-        try:
-            filename = await backup.create_backup("manual", f"by_{interaction.user.name}")
-            logger.info(f"Manual backup created by {interaction.user} (ID: {interaction.user.id}): {filename}")
-            await interaction.followup.send(f"✅ Backup created: `{filename}`", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Failed to create backup: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to create backup. Please try again.", ephemeral=True)
-
-    @data_group.command(name="list", description="List all available backups")
-    async def list_backups(self, interaction: discord.Interaction):
-        start_time = datetime.now()
-        logger.info(f"list_backups started by {interaction.user.id} at {start_time}")
+            return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
 
         await interaction.response.defer(ephemeral=True)
 
-        if not self.has_full_access(interaction):
-            await interaction.followup.send("❌ You need the Council role to use this command.", ephemeral=True)
-            return
-
         try:
-            backups = await backup.list_backups()
-            logger.info(f"list_backups found {len(backups)} backups, elapsed {datetime.now() - start_time}")
-
-            if not backups:
-                await interaction.followup.send("ℹ️ No backups found. Create one with `/data backup`.", ephemeral=True)
-                return
-
-            lines = []
-            for b in backups[:10]:
-                age = (datetime.now() - b["created"]).days
-                size = b["size"]
-                if size > 1024 * 1024:
-                    size_str = f"{size / (1024 * 1024):.1f} MB"
-                elif size > 1024:
-                    size_str = f"{size / 1024:.1f} KB"
-                else:
-                    size_str = f"{size} B"
-                lines.append(f"`{b['filename']}` ({b['type']}) – {age}d ago, {size_str}")
-
-            embed = discord.Embed(title="Backups", description="\n".join(lines))
-            logger.info(f"list_backups completed, sending embed")
+            filename = await backup.create_backup("manual", note or "manual_backup")
+            embed = discord.Embed(
+                title="✅ Backup Created",
+                description=f"Backup file: `{filename}`",
+                color=0x43B581
+            )
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            logger.error(f"Failed to list backups: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to list backups. Please try again.", ephemeral=True)
+            logger.error(f"Backup creation failed: {e}", exc_info=True)
+            await interaction.followup.send("❌ Failed to create backup. Check logs for details.", ephemeral=True)
 
-    @data_group.command(name="restore", description="Restore a backup (owner only)")
-    async def restore(self, interaction: discord.Interaction):
+    @data_group.command(name="list_backups", description="List all available backups")
+    @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "data_list_backups"))
+    async def data_list_backups(self, interaction: discord.Interaction):
+        if not self.has_full_access(interaction):
+            return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
+
         await interaction.response.defer(ephemeral=True)
 
-        if not self.is_owner(interaction):
-            await interaction.followup.send("❌ Only the server owner can restore backups.", ephemeral=True)
+        backups = await backup.list_backups()
+
+        if not backups:
+            await interaction.followup.send("No backups found.", ephemeral=True)
             return
 
-        try:
-            backups = await backup.list_backups()
-            if not backups:
-                await interaction.followup.send("ℹ️ No backups available to restore. Create one with `/data backup`.", ephemeral=True)
-                return
-
-            view = BackupSelectView(backups, interaction.user.id)
-            await interaction.followup.send("Select a backup to restore:", view=view, ephemeral=True)
-        except Exception as e:
-            logger.error(f"Failed to prepare restore: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to prepare restore. Please try again.", ephemeral=True)
-
-    @data_group.command(name="reset", description="⚠️ WIPE ALL DATA (owner only) – creates a backup first")
-    async def reset(self, interaction: discord.Interaction):
-        """Reset the entire database: deletes all citizens and settlements."""
-        await interaction.response.defer(ephemeral=True)
-
-        if not self.is_owner(interaction):
-            await interaction.followup.send("❌ Only the server owner can reset the database.", ephemeral=True)
-            return
-
-        # 1. Create a pre-reset backup
-        try:
-            backup_filename = await backup.create_backup("pre_reset", f"by_{interaction.user.name}")
-            logger.info(f"Pre-reset backup created: {backup_filename}")
-        except Exception as e:
-            logger.error(f"Failed to create pre-reset backup: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to create backup. Reset cancelled.", ephemeral=True)
-            return
-
-        # 2. Show confirmation with backup info
         embed = discord.Embed(
-            title="⚠️ Confirm Database Reset",
-            description=(
-                f"Are you sure you want to **delete all citizens and settlements**?\n\n"
-                f"**Backup created:** `{backup_filename}`\n"
-                f"**Type:** pre_reset\n"
-                f"**Created:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                f"This action is **irreversible**. You can restore later using `/data restore`."
-            ),
+            title="📦 Available Backups",
+            color=0x7289DA
+        )
+
+        backup_text = []
+        for b in backups[:20]:
+            backup_text.append(f"• `{b['filename']}`")
+            backup_text.append(f"  {b['created'].strftime('%Y-%m-%d %H:%M')} - {b['size'] // 1024}KB")
+            if b.get("note"):
+                backup_text.append(f"  Note: {b['note']}")
+
+        if backup_text:
+            embed.description = "\n".join(backup_text)
+        else:
+            embed.description = "No backups found."
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @data_group.command(name="restore", description="Restore database from backup")
+    @app_commands.autocomplete(filename=backup_autocomplete)
+    @app_commands.checks.cooldown(1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_restore"))
+    async def data_restore(self, interaction: discord.Interaction, filename: str):
+        # This is a critical operation - only the owner can perform it
+        if interaction.user.id != Config.OWNER_ID:
+            return await interaction.response.send_message("❌ Only the bot owner can restore backups.", ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+
+        # Verify backup exists
+        backups = await backup.list_backups()
+        backup_exists = any(b["filename"] == filename for b in backups)
+
+        if not backup_exists:
+            await interaction.followup.send(f"❌ Backup `{filename}` not found.", ephemeral=True)
+            return
+
+        # Send confirmation prompt
+        class RestoreConfirm(discord.ui.View):
+            def __init__(self, owner_id):
+                super().__init__(timeout=30)
+                self.owner_id = owner_id
+
+            @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+            async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.owner_id:
+                    return await interaction.response.send_message("You are not authorized.", ephemeral=True)
+
+                await interaction.response.defer(ephemeral=True)
+                try:
+                    await backup.restore_backup(filename)
+                    embed = discord.Embed(
+                        title="✅ Database Restored",
+                        description=f"Successfully restored from `{filename}`.",
+                        color=0x43B581
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                except Exception as e:
+                    logger.error(f"Restore failed: {e}", exc_info=True)
+                    await interaction.followup.send(f"❌ Restore failed: {e}", ephemeral=True)
+                self.stop()
+
+            @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+            async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                if interaction.user.id != self.owner_id:
+                    return await interaction.response.send_message("You are not authorized.", ephemeral=True)
+                await interaction.response.send_message("Restore cancelled.", ephemeral=True)
+                self.stop()
+
+        embed = discord.Embed(
+            title="⚠️ Confirm Database Restore",
+            description=f"Are you sure you want to restore from `{filename}`?\n\nThis will overwrite the current database and cannot be undone.",
             color=0xff9900
         )
-        view = ResetConfirmView(self, backup_filename, interaction.user.id)
+        view = RestoreConfirm(interaction.user.id)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(DataCog(bot))
-
-
-class BackupSelectView(discord.ui.View):
-    def __init__(self, backups: list, user_id: int):
-        super().__init__(timeout=60)
-        self.user_id = user_id
-        self.backups = backups
-
-        options = []
-        for b in backups[:25]:
-            label = f"{b['filename'][:50]}"
-            desc = f"{b['type']} - {b['created'].strftime('%d/%m/%Y')} ({b['size']/1024:.1f} KB)"
-            options.append(discord.SelectOption(label=label, description=desc[:100], value=b['filename']))
-
-        select = discord.ui.Select(placeholder="Choose a backup...", options=options)
-        select.callback = self.select_callback
-        self.add_item(select)
-
-    async def on_timeout(self):
-        """Called when the view times out."""
-        logger.debug(f"BackupSelectView timed out for user {self.user_id}")
-        for child in self.children:
-            child.disabled = True
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("You cannot interact with this menu.", ephemeral=True)
-            return False
-        return True
-
-    async def select_callback(self, interaction: discord.Interaction):
-        selected_file = interaction.data['values'][0]
-        backup_entry = next((b for b in self.backups if b['filename'] == selected_file), None)
-        if not backup_entry:
-            await interaction.response.edit_message(content="Backup not found.", view=None)
-            return
-
-        view = RestoreConfirmView(backup_entry['filename'], self.user_id)
-        embed = discord.Embed(
-            title="Confirm Restore",
-            description=f"Are you sure you want to restore **{backup_entry['filename']}**?\n\n"
-                        f"**Type:** {backup_entry['type']}\n"
-                        f"**Created:** {backup_entry['created'].strftime('%Y-%m-%d %H:%M:%S')}\n"
-                        f"**Size:** {backup_entry['size'] / 1024:.1f} KB\n\n"
-                        f"⚠️ This will overwrite the current database. A backup of the current state will be created automatically.",
-            color=0xff9900
-        )
-        await interaction.response.edit_message(content=None, embed=embed, view=view)
-
-
-class RestoreConfirmView(discord.ui.View):
-    def __init__(self, filename: str, user_id: int):
-        super().__init__(timeout=60)
-        self.filename = filename
-        self.user_id = user_id
-
-    async def on_timeout(self):
-        """Called when the view times out."""
-        logger.debug(f"RestoreConfirmView timed out for user {self.user_id}")
-        for child in self.children:
-            child.disabled = True
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("You cannot confirm this action.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.confirm.disabled = True
-        self.cancel.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        try:
-            success = await backup.restore_backup(self.filename)
-
-            if success:
-                await db.close_pool()
-                await asyncio.sleep(3)
-                await db.get_pool()
-                logger.info(f"Database restored by {interaction.user} (ID: {interaction.user.id}) from {self.filename}")
-                await interaction.followup.send(f"✅ Database restored from `{self.filename}`.", ephemeral=True)
-            else:
-                logger.warning(f"Restore attempted by {interaction.user} (ID: {interaction.user.id}) from {self.filename} – FAILED")
-                await interaction.followup.send(f"❌ Restore failed.", ephemeral=True)
-        except Exception as e:
-            logger.error(f"Restore error: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Restore failed: {e}", ephemeral=True)
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Restore cancelled.", embed=None, view=None)
-
-
-class ResetConfirmView(discord.ui.View):
-    def __init__(self, cog: DataCog, backup_filename: str, user_id: int):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.backup_filename = backup_filename
-        self.user_id = user_id
-
-    async def on_timeout(self):
-        """Called when the view times out."""
-        logger.debug(f"ResetConfirmView timed out for user {self.user_id}")
-        for child in self.children:
-            child.disabled = True
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("You cannot confirm this action.", ephemeral=True)
-            return False
-        return True
-
-    @discord.ui.button(label="Confirm Reset", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.confirm.disabled = True
-        self.cancel.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        try:
-            await db.reset_db()
-            logger.info(f"Database reset by {interaction.user} (ID: {interaction.user.id}) – backup: {self.backup_filename}")
-            await interaction.followup.send(
-                f"✅ Database has been reset. Backup saved as `{self.backup_filename}`.\n"
-                f"You can restore it anytime with `/data restore`.",
-                ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Reset failed: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ Reset failed: {e}", ephemeral=True)
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Reset cancelled.", embed=None, view=None)
