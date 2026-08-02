@@ -10,6 +10,7 @@ from core.config import Config
 from core import database as db
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
+from tasks.uptime_monitor import UptimeMonitor
 from web.http_keepalive import start_http_server
 
 logging.basicConfig(
@@ -36,6 +37,7 @@ class PaviaBot(commands.Bot):
         )
         self.http_session = None
         self.activity_monitor = None
+        self.uptime_monitor = None
 
     async def setup_hook(self):
         """
@@ -77,7 +79,16 @@ class PaviaBot(commands.Bot):
         except Exception as e:
             logger.error(f"Failed to start daily_backup loop: {e}", exc_info=True)
 
-        # 3c. Start the HTTP keep-alive server so the host platform (e.g. Render)
+        # 3c. Start the CivMC uptime monitor (edge-triggered outage alerts).
+        #     Polls mcsrvstat.us every UPTIME_CHECK_INTERVAL seconds and posts
+        #     to ALERT_CHANNEL_ID only on online<->offline transitions.
+        try:
+            self.uptime_monitor = UptimeMonitor(self)
+            self.uptime_monitor.start()
+        except Exception as e:
+            logger.error(f"Failed to start uptime_monitor: {e}", exc_info=True)
+
+        # 3d. Start the HTTP keep-alive server so the host platform (e.g. Render)
         #     does not mark the service as idle and shut it down.
         try:
             start_http_server()
@@ -176,6 +187,10 @@ class PaviaBot(commands.Bot):
         if self.daily_backup.is_running():
             self.daily_backup.cancel()
             logger.info("Stopped daily_backup loop")
+
+        # Stop the uptime monitor if it's running
+        if self.uptime_monitor:
+            self.uptime_monitor.stop()
 
         # Close HTTP session
         if self.http_session and not self.http_session.closed:
