@@ -137,6 +137,11 @@ class ActivityMonitor:
             [c["ign"] for c in citizens], self.bot.http_session
         )
 
+        # If CivInfo auth is broken, the monthly report's "active population"
+        # numbers would all be zero and mislead leadership. We annotate the
+        # report honestly instead.
+        auth_broken = civinfo_api.is_auth_broken()
+
         for c in citizens:
             _, emoji, _, _ = activities.get(c["ign"], ("error", "⚪", None, "Error"))
             is_active = (emoji == "🟢")
@@ -180,7 +185,11 @@ class ActivityMonitor:
         total_citizens = len(citizens)
         active_citizens = sum(province_active.values())
         lines.append(f"**Total Registered population (does not account for actual activity):** {total_citizens}\n")
-        lines.append(f"**Active population (all players who have logged on within the month)**: {active_citizens} ({round(active_citizens/total_citizens*100, 2)}% of reg. citizens)\n")
+        if auth_broken:
+            lines.append(f"**Active population**: ⚠️ **Unavailable** — CivInfo API auth required. The numbers below are unreliable.\n")
+        else:
+            pct = round(active_citizens/total_citizens*100, 2) if total_citizens else 0
+            lines.append(f"**Active population (all players who have logged on within the month)**: {active_citizens} ({pct}% of reg. citizens)\n")
 
         if old_snapshots:
             old_total = sum(s["total"] for s in old_snapshots if s["district"] is None)
