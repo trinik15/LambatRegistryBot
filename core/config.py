@@ -13,6 +13,13 @@ class Config:
     # Required: Database URL
     DATABASE_URL = os.getenv("DATABASE_URL")
 
+    # Discord Guild ID (optional but recommended for single-server bots).
+    # When set, slash commands are synced to this guild INSTANTLY on startup
+    # (instead of globally, which can take up to 1 hour to propagate). This is
+    # the correct choice for a nation bot that only serves one Discord server.
+    # Leave 0 to use global sync (slower, but works across all servers).
+    GUILD_ID = int(os.getenv("GUILD_ID", 0))
+
     # Required: Owner ID
     OWNER_ID = int(os.getenv("OWNER_ID", 0))
 
@@ -22,11 +29,6 @@ class Config:
     GUEST_ROLE_ID = int(os.getenv("GUEST_ROLE_ID", 0))
     SETTLER_ROLE_ID = int(os.getenv("SETTLER_ROLE_ID", 0))
     CITIZEN_ROLE_IDS = [int(x.strip()) for x in os.getenv("CITIZEN_ROLE_IDS", "").split(",") if x.strip()]
-
-    # Channel configuration
-    COUNCIL_CHANNEL_ID = int(os.getenv("COUNCIL_CHANNEL_ID", 0))
-    REGISTRY_CHANNEL_ID = int(os.getenv("REGISTRY_CHANNEL_ID", 0))
-    AUDIT_LOG_CHANNEL_ID = int(os.getenv("AUDIT_LOG_CHANNEL_ID", 0))
 
     # Monthly census report destination
     # Channel that receives the monthly population snapshot, and the role to ping.
@@ -43,9 +45,6 @@ class Config:
     COOLDOWN_MEDIUM = int(os.getenv("COOLDOWN_MEDIUM", 15))     # Data modification commands
     COOLDOWN_SLOW = int(os.getenv("COOLDOWN_SLOW", 60))         # Expensive operations (reports, exports)
     COOLDOWN_CRITICAL = int(os.getenv("COOLDOWN_CRITICAL", 120)) # Very expensive ops (backup, restore)
-
-    # CivInfo API rate limiting
-    CIVINFO_API_RATE_LIMIT = int(os.getenv("CIVINFO_API_RATE_LIMIT", 10))
 
     # CivInfo API key (optional but recommended).
     # The CivInfo API now requires authentication (contact

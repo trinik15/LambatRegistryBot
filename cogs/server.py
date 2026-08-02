@@ -68,7 +68,7 @@ class ServerCog(commands.Cog):
             logger.error(f"Failed to fetch server status: {e}", exc_info=True)
             embed = discord.Embed(
                 title="🖥️ CivMC Server Status",
-                description=f"❌ Could not reach the status API.\n``{e}``",
+                description="❌ Could not reach the status API. Please try again in a moment.",
                 color=0xED4245
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -131,23 +131,27 @@ class ServerCog(commands.Cog):
     @server_group.command(name="ping", description="Quick server reachability check")
     @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "server_ping"))
     async def server_ping(self, interaction: discord.Interaction):
-        """Lightweight one-line status — no defer, no icon, just the facts."""
+        """Lightweight one-line status."""
+        # Defer in case the status API is slow — avoids Discord's 3-second
+        # interaction timeout. The followup is still public (not ephemeral).
+        await interaction.response.defer()
         try:
             s = await self._fetch_status()
         except Exception as e:
-            await interaction.response.send_message(
-                f"🔴 **CivMC** — status API unreachable (`{e}`)",
+            logger.error(f"Server ping failed: {e}", exc_info=True)
+            await interaction.followup.send(
+                "🔴 **CivMC** — status API unreachable right now.",
                 ephemeral=True
             )
             return
 
         if s["online"]:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"🟢 **CivMC** is online — {s['players_online']}/{s['players_max']} players "
                 f"(v{s['version']})"
             )
         else:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"🔴 **CivMC** is offline right now."
             )
 

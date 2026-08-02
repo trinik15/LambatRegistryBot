@@ -197,21 +197,3 @@ async def _execute_on_conn(conn, query: str, params: tuple, fetch_one: bool, fet
             return int(result.split()[-1])
         except (ValueError, IndexError):
             return 0
-
-
-async def reset_db():
-    """
-    Reset the entire database: deletes all data from tables in correct order.
-    """
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        try:
-            async with conn.transaction():
-                await conn.execute("DELETE FROM activity_cache;")
-                await conn.execute("DELETE FROM citizens;")
-                await conn.execute("DELETE FROM settlements;")
-                await conn.execute("DELETE FROM monthly_snapshots;")
-            logger.info("Database reset: all tables cleared.")
-        except Exception as e:
-            logger.error(f"Database reset failed: {e}", exc_info=True)
-            raise

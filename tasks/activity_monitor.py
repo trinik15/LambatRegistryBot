@@ -4,7 +4,7 @@ from core import database as db
 from api import civinfo_api
 from core.config import Config
 from core.constants import Emojis
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 import asyncio
 
@@ -55,16 +55,16 @@ SETTLEMENT_TO_DUCHY = {
 class ActivityMonitor:
     def __init__(self, bot):
         self.bot = bot
-        logger.info("🟢 ActivityMonitor INITIALIZED")
+        logger.info("ActivityMonitor INITIALIZED")
 
     @tasks.loop(hours=24)
     async def daily_check(self):
-        logger.info("🟡 daily_check LOOP ENTERED")
+        logger.info("daily_check LOOP ENTERED")
         try:
             await self.bot.wait_until_ready()
             logger.info("Starting daily activity check")
 
-            today = datetime.now()
+            today = datetime.now(timezone.utc)
             citizens = await db.execute_query("SELECT ign, join_date, settlement FROM citizens", fetch_all=True)
             if not citizens:
                 logger.info("No citizens to check")
@@ -83,34 +83,31 @@ class ActivityMonitor:
 
             logger.info("Daily activity check completed")
         except Exception as e:
-            logger.error(f"❌ Error in daily_check: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error in daily_check: {e}", exc_info=True)
 
     @daily_check.before_loop
     async def before_daily_check(self):
         try:
-            logger.info("🟠 before_daily_check CALLED")
+            logger.info("before_daily_check CALLED")
             await self.bot.wait_until_ready()
-            now = datetime.now()
-            # Esegui il daily_check ogni giorno alle 2:00 (ora del server)
+            # Run at 02:00 UTC (consistent across deployments). See
+            # before_daily_backup in main.py for the same pattern.
+            now = datetime.now(timezone.utc)
             target = now.replace(hour=2, minute=0, second=0, microsecond=0)
             if now > target:
                 target += timedelta(days=1)
             wait_seconds = (target - now).total_seconds()
-            logger.info(f"⏳ daily_check: waiting {wait_seconds:.0f} seconds until {target}")
+            logger.info(f"daily_check: waiting {wait_seconds:.0f} seconds until {target}")
             await asyncio.sleep(wait_seconds)
-            logger.info("⏰ Wait finished, starting daily_check")
+            logger.info("Wait finished, starting daily_check")
         except Exception as e:
-            logger.error(f"❌ Error in before_daily_check: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error in before_daily_check: {e}", exc_info=True)
 
     async def generate_monthly_report(self):
-        """Genera e invia il report mensile dettagliato nel canale census."""
+        """Generate and send the detailed monthly census report."""
         logger.info("Generating monthly report...")
 
-        today = datetime.now()
+        today = datetime.now(timezone.utc)
         # Data dell'ultimo giorno del mese precedente (es. se oggi è 1 marzo, last_month = 28/29 febbraio)
         last_month = today.replace(day=1) - timedelta(days=1)
         last_month_date = last_month.date()
@@ -281,33 +278,48 @@ class ActivityMonitor:
         channel = None
         if Config.MONTHLY_REPORT_CHANNEL_ID:
             channel = self.bot.get_channel(Config.MONTHLY_REPORT_CHANNEL_ID)
+            if channel is None:
+                # Channel not in cache (e.g. bot just started). Fetch from API.
+                try:
+                    channel = await self.bot.fetch_channel(Config.MONTHLY_REPORT_CHANNEL_ID)
+                except discord.NotFound:
+                    logger.error(f"Monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID} not found.")
+                except discord.Forbidden:
+                    logger.error(f"Bot lacks permission to view monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID}.")
+                except Exception as e:
+                    logger.error(f"Could not fetch monthly report channel: {e}", exc_info=True)
         else:
             logger.error("MONTHLY_REPORT_CHANNEL_ID is not set; cannot send monthly report.")
         if channel:
             full_message = "\n".join(lines)
-            if len(full_message) <= 2000:
-                await channel.send(full_message)
-            else:
-                # Dividi senza spezzare le righe
-                parts = []
-                current = []
-                current_len = 0
-                for line in lines:
-                    line_len = len(line) + 1  # +1 per il newline che verrà aggiunto
-                    if current_len + line_len > 1900:
+            try:
+                if len(full_message) <= 2000:
+                    await channel.send(full_message)
+                else:
+                    # Split without breaking lines (stay under Discord's 2000-char limit).
+                    parts = []
+                    current = []
+                    current_len = 0
+                    for line in lines:
+                        line_len = len(line) + 1  # +1 for the newline
+                        if current_len + line_len > 1900:
+                            parts.append("\n".join(current))
+                            current = [line]
+                            current_len = line_len
+                        else:
+                            current.append(line)
+                            current_len += line_len
+                    if current:
                         parts.append("\n".join(current))
-                        current = [line]
-                        current_len = line_len
-                    else:
-                        current.append(line)
-                        current_len += line_len
-                if current:
-                    parts.append("\n".join(current))
-                for part in parts:
-                    await channel.send(part)
-            logger.info("Monthly report sent")
+                    for part in parts:
+                        await channel.send(part)
+                logger.info("Monthly report sent")
+            except discord.Forbidden:
+                logger.error(f"Bot lacks permission to send in monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID}.")
+            except discord.HTTPException as e:
+                logger.error(f"Failed to send monthly report to Discord: {e}", exc_info=True)
         else:
-            logger.error("Census channel not found")
+            logger.error("Census channel not found — snapshot will still be saved.")
 
         # Salva snapshot corrente — DELETE + all INSERTs in ONE transaction so
         # a failure midway can never leave the snapshots table half-populated

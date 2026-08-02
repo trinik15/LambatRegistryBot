@@ -6,6 +6,7 @@ from core.config import Config
 from api import civinfo_api
 from tasks.activity_monitor import _fetch_activities
 import logging
+import asyncio
 import csv
 import io
 from typing import Optional, List, Dict, Any
@@ -177,6 +178,7 @@ class ReportsCog(commands.Cog):
 
         view = utils.PaginationView(embeds, interaction.user, timeout=300)
         await interaction.followup.send(embed=embeds[0], view=view)
+        view.message = await interaction.original_response()
 
     @reports_group.command(name="stats", description="Show population statistics")
     @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "report_stats"))
@@ -271,7 +273,6 @@ class ReportsCog(commands.Cog):
             )
 
         # Render the chart in an executor (matplotlib is sync / CPU-bound).
-        import asyncio
         import services.charts as charts
 
         try:
@@ -284,7 +285,8 @@ class ReportsCog(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to render trends chart: {e}", exc_info=True)
             await interaction.followup.send(
-                f"❌ Could not render the chart: `{e}`", ephemeral=True
+                "❌ Could not render the trend chart. Please try again later or contact an admin.",
+                ephemeral=True
             )
             return
 
@@ -350,7 +352,8 @@ class ReportsCog(commands.Cog):
         await interaction.response.defer()
 
         rows = await db.execute_query(
-            "SELECT ign, discord_id, settlement, join_date, address, mailbox FROM citizens ORDER BY settlement, ign",
+            "SELECT ign, discord_id, settlement, join_date, address, mailbox, "
+            "recruiter_ids, notes FROM citizens ORDER BY settlement, ign",
             fetch_all=True
         )
 
@@ -361,7 +364,7 @@ class ReportsCog(commands.Cog):
         # Create CSV in memory
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["IGN", "Discord ID", "Settlement", "Join Date", "Address", "Mailbox"])
+        writer.writerow(["IGN", "Discord ID", "Settlement", "Join Date", "Address", "Mailbox", "Recruiter IDs", "Notes"])
 
         for row in rows:
             writer.writerow([
@@ -369,8 +372,10 @@ class ReportsCog(commands.Cog):
                 row["discord_id"],
                 row["settlement"],
                 utils.format_date(row["join_date"]),
-                row.get("address", ""),
-                row.get("mailbox", "")
+                row["address"] or "",
+                row["mailbox"] or "",
+                row["recruiter_ids"] or "",
+                row["notes"] or "",
             ])
 
         output.seek(0)

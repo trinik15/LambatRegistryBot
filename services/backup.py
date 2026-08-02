@@ -2,7 +2,7 @@ import os
 import re
 import asyncio
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from core.config import Config
 import logging
@@ -57,8 +57,8 @@ def _parse_db_url(url):
 
 
 async def create_backup(backup_type="manual", note=""):
-    """Crea un backup del database usando pg_dump."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    """Create a database backup using pg_dump."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     safe_note = f"_{_sanitize_note(note)}" if note else ""
     filename = f"{backup_type}_{timestamp}{safe_note}.sql"
     backup_path = _safe_backup_path(filename)
@@ -163,7 +163,7 @@ async def restore_backup(filename):
     user, password, host, port, dbname = _parse_db_url(DATABASE_URL)
 
     def _sync_restore():
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         emergency_filename = f"pre_restore_{timestamp}_before_restore.sql"
         emergency_path = _safe_backup_path(emergency_filename)
         env = os.environ.copy()

@@ -1,0 +1,21 @@
+# Keep the Docker build context lean — don't copy dev/runtime artifacts.
+.git
+.gitignore
+.gitattributes
+*.md
+.env
+.env.*
+!.env.example
+backups/
+*.log
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.tox/
+.idea/
+.vscode/
+*.egg-info/

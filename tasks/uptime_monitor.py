@@ -14,7 +14,7 @@ from discord.ext import tasks
 from core.config import Config
 import logging
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class UptimeMonitor:
                 # Transition: offline -> online (recovery).
                 duration_str = ""
                 if self.outage_start:
-                    delta = datetime.now() - self.outage_start
+                    delta = datetime.now(timezone.utc) - self.outage_start
                     mins = int(delta.total_seconds() // 60)
                     if mins < 60:
                         duration_str = f" (was down ~{mins}m)"
@@ -132,7 +132,7 @@ class UptimeMonitor:
 
             # We've confirmed the outage (enough consecutive failures).
             if not self.alerted_outage:
-                self.outage_start = self.outage_start or datetime.now()
+                self.outage_start = self.outage_start or datetime.now(timezone.utc)
                 self.last_online = False
                 self.alerted_outage = True
 
