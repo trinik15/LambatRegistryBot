@@ -10,6 +10,29 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
+# Max concurrent CivInfo requests. The API is hit on-demand by /report census
+# and once a day by daily_check; doing these sequentially made large registries
+# take minutes. 5 concurrent is conservative enough to avoid rate-limiting
+# while cutting wall-time by ~5x (the per-IGN TTL cache absorbs repeats).
+CIVINFO_CONCURRENCY = 5
+
+
+async def _fetch_activities(igns, session):
+    """Fetch CivInfo activity for many IGNs concurrently.
+
+    Returns ``{ign: (status, emoji, last_login, status_text)}``.
+    Bounded by a semaphore so we don't fire hundreds of requests at once.
+    """
+    sem = asyncio.Semaphore(CIVINFO_CONCURRENCY)
+
+    async def _one(ign):
+        async with sem:
+            return ign, await civinfo_api.get_player_activity(ign, session)
+
+    results = await asyncio.gather(*(_one(ign) for ign in igns), return_exceptions=False)
+    return {ign: data for ign, data in results}
+
+
 # Mappa distretto -> provincia (duchy)
 SETTLEMENT_TO_DUCHY = {
     "New September": "Lambat City",
@@ -48,10 +71,10 @@ class ActivityMonitor:
                 return
 
             # 1. Aggiorna la cache di attività per tutti i cittadini
+            #    (concurrent + bounded by a semaphore — was sequential with a
+            #     0.5s sleep per citizen, which took minutes on big registries).
             session = self.bot.http_session
-            for row in citizens:
-                await civinfo_api.get_player_activity(row["ign"], session)
-                await asyncio.sleep(0.5)
+            await _fetch_activities([row["ign"] for row in citizens], session)
 
             # 2. Se è il primo del mese → genera report mensile
             if today.day == 1:   # solo il primo giorno del mese
@@ -107,8 +130,15 @@ class ActivityMonitor:
         district_totals = {}
         district_active = {}
 
+        # Fetch every citizen's activity in one concurrent batch instead of
+        # one await per citizen (the old loop could exceed Discord's 15-minute
+        # interaction token window for large registries).
+        activities = await _fetch_activities(
+            [c["ign"] for c in citizens], self.bot.http_session
+        )
+
         for c in citizens:
-            status, emoji, last_login, _ = await civinfo_api.get_player_activity(c["ign"], self.bot.http_session)
+            _, emoji, _, _ = activities.get(c["ign"], ("error", "⚪", None, "Error"))
             is_active = (emoji == "🟢")
 
             district = c["settlement"]
@@ -165,15 +195,22 @@ class ActivityMonitor:
             lines.append("")
 
         # Nuovi cittadini (negli ultimi 30 giorni)
-        one_month_ago = today - timedelta(days=30)
+        # join_date is a DATE object after migration; compare as dates.
+        one_month_ago = today.date() - timedelta(days=30)
         new_citizens = 0
         for c in citizens:
-            try:
-                join_date = datetime.strptime(c["join_date"], "%d/%m/%Y")
-                if join_date >= one_month_ago:
-                    new_citizens += 1
-            except:
-                pass
+            jd = c["join_date"]
+            # jd is a datetime.date after migration; fall back to parsing if
+            # somehow still a string (defensive).
+            if hasattr(jd, "year"):
+                join_date = jd
+            else:
+                try:
+                    join_date = datetime.strptime(str(jd), "%d/%m/%Y").date()
+                except Exception:
+                    continue
+            if join_date >= one_month_ago:
+                new_citizens += 1
         lines.append(f"Gain: +{new_citizens} new citizens (excludes removed/revoked recruits and returnees)\n")
 
         # POPULATION PER PROVINCE/TERRITORY
@@ -228,10 +265,15 @@ class ActivityMonitor:
             lines.append(f"{district} {emoji} - {active} {change_str}")
         lines.append("")
 
-        lines.append("<@&1067779118030143549>")  # ping ruolo council
+        if Config.MONTHLY_REPORT_ROLE_ID:
+            lines.append(f"<@&{Config.MONTHLY_REPORT_ROLE_ID}>")  # ping configurable role
 
-        # Invio nel canale census (ID di test, sostituisci con il canale reale quando serve)
-        channel = self.bot.get_channel(1477763652731015209)
+        # Send to the configured census channel.
+        channel = None
+        if Config.MONTHLY_REPORT_CHANNEL_ID:
+            channel = self.bot.get_channel(Config.MONTHLY_REPORT_CHANNEL_ID)
+        else:
+            logger.error("MONTHLY_REPORT_CHANNEL_ID is not set; cannot send monthly report.")
         if channel:
             full_message = "\n".join(lines)
             if len(full_message) <= 2000:
@@ -258,19 +300,25 @@ class ActivityMonitor:
         else:
             logger.error("Census channel not found")
 
-        # Salva snapshot corrente
+        # Salva snapshot corrente — DELETE + all INSERTs in ONE transaction so
+        # a failure midway can never leave the snapshots table half-populated
+        # (which would corrupt next month's "change since last month" math).
         snapshot_date = today.date()
-        await db.execute_query("DELETE FROM monthly_snapshots WHERE snapshot_date = $1", (snapshot_date,))
-
+        snapshot_rows = []
         for duchy, total in province_totals.items():
-            await db.execute_query(
-                "INSERT INTO monthly_snapshots (snapshot_date, duchy, district, total, active) VALUES ($1, $2, $3, $4, $5)",
-                (snapshot_date, duchy, None, total, province_active.get(duchy, 0))
-            )
+            snapshot_rows.append((snapshot_date, duchy, None, total, province_active.get(duchy, 0)))
         for district, total in district_totals.items():
             duchy = SETTLEMENT_TO_DUCHY.get(district, "Unknown")
-            await db.execute_query(
-                "INSERT INTO monthly_snapshots (snapshot_date, duchy, district, total, active) VALUES ($1, $2, $3, $4, $5)",
-                (snapshot_date, duchy, district, total, district_active.get(district, 0))
-            )
-        logger.info("Monthly snapshot saved")
+            snapshot_rows.append((snapshot_date, duchy, district, total, district_active.get(district, 0)))
+
+        pool = await db.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM monthly_snapshots WHERE snapshot_date = $1", snapshot_date)
+                if snapshot_rows:
+                    await conn.executemany(
+                        "INSERT INTO monthly_snapshots (snapshot_date, duchy, district, total, active) "
+                        "VALUES ($1, $2, $3, $4, $5)",
+                        snapshot_rows
+                    )
+        logger.info(f"Monthly snapshot saved ({len(snapshot_rows)} rows).")

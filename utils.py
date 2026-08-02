@@ -65,3 +65,48 @@ def is_valid_date(date_str: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def parse_join_date(date_str: str):
+    """Parse a DD/MM/YYYY string into a datetime.date object.
+
+    Returns None if the input cannot be parsed. Accepts DD/MM/YYYY (the
+    user-facing format) and ISO YYYY-MM-DD (the format asyncpg returns when
+    a DATE column is accidentally stringified).
+    """
+    from datetime import datetime
+    if date_str is None:
+        return None
+    if isinstance(date_str, str):
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(date_str, fmt).date()
+            except ValueError:
+                continue
+        return None
+    # Already a date/datetime
+    if hasattr(date_str, "year"):
+        try:
+            return date_str.date() if hasattr(date_str, "date") else date_str
+        except Exception:
+            return None
+    return None
+
+
+def format_date(value, fmt: str = "%d/%m/%Y") -> str:
+    """Format a date/datetime/string as DD/MM/YYYY for display.
+
+    Robust to: date objects (from asyncpg DATE columns), datetime objects,
+    DD/MM/YYYY strings, YYYY-MM-DD strings, and None.
+    """
+    from datetime import date, datetime
+    if value is None:
+        return "N/A"
+    if isinstance(value, (date, datetime)):
+        return value.strftime(fmt)
+    if isinstance(value, str):
+        parsed = parse_join_date(value)
+        if parsed is not None:
+            return parsed.strftime(fmt)
+        return value
+    return str(value)

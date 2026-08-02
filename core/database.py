@@ -47,12 +47,20 @@ async def init_db():
     """
     Initialize database tables and indexes.
     Call this during bot startup after the connection pool is ready.
+
+    Includes idempotent migrations:
+      - citizens.ign / activity_cache.ign: TEXT -> CITEXT (case-insensitive)
+      - citizens.join_date: TEXT (DD/MM/YYYY) -> DATE
     """
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # Create tables and indexes as before...
+                # citext extension must exist before any CITEXT column can be
+                # created (fresh installs) or altered into (upgrades).
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS citext")
+
+                # --- Tables (fresh install uses CITEXT/DATE directly) ---
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS settlements (
                         name TEXT PRIMARY KEY
@@ -60,20 +68,20 @@ async def init_db():
                 """)
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS citizens (
-                        ign TEXT PRIMARY KEY,
+                        ign CITEXT PRIMARY KEY,
                         discord_id TEXT UNIQUE NOT NULL,
                         settlement TEXT NOT NULL,
                         recruiter_ids TEXT NOT NULL,
                         address TEXT,
                         mailbox TEXT,
                         notes TEXT,
-                        join_date TEXT NOT NULL,
+                        join_date DATE NOT NULL,
                         FOREIGN KEY (settlement) REFERENCES settlements(name) ON DELETE RESTRICT
                     )
                 """)
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS activity_cache (
-                        ign TEXT PRIMARY KEY,
+                        ign CITEXT PRIMARY KEY,
                         last_login TIMESTAMP,
                         status TEXT,
                         last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -93,6 +101,47 @@ async def init_db():
                 """)
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_citizens_settlement ON citizens(settlement)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_citizens_discord ON citizens(discord_id)")
+
+                # --- Idempotent migrations for existing TEXT-based installs ---
+
+                # ign TEXT -> CITEXT (citizens + activity_cache, preserving FK)
+                col_ign = await conn.fetchrow(
+                    "SELECT udt_name FROM information_schema.columns "
+                    "WHERE table_name = 'citizens' AND column_name = 'ign'"
+                )
+                if col_ign and col_ign['udt_name'] == 'text':
+                    # Drop the FK temporarily so both columns can be altered.
+                    await conn.execute(
+                        "ALTER TABLE activity_cache DROP CONSTRAINT IF EXISTS activity_cache_ign_fkey"
+                    )
+                    await conn.execute(
+                        "ALTER TABLE citizens ALTER COLUMN ign TYPE CITEXT USING ign::CITEXT"
+                    )
+                    await conn.execute(
+                        "ALTER TABLE activity_cache ALTER COLUMN ign TYPE CITEXT USING ign::CITEXT"
+                    )
+                    # Recreate the FK with the same ON DELETE CASCADE rule.
+                    await conn.execute(
+                        "ALTER TABLE activity_cache "
+                        "ADD CONSTRAINT activity_cache_ign_fkey "
+                        "FOREIGN KEY (ign) REFERENCES citizens(ign) ON DELETE CASCADE"
+                    )
+                    logger.info("Migrated citizens.ign and activity_cache.ign to CITEXT (case-insensitive).")
+
+                # join_date TEXT (DD/MM/YYYY) -> DATE
+                col_jd = await conn.fetchrow(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_name = 'citizens' AND column_name = 'join_date'"
+                )
+                if col_jd and col_jd['data_type'] == 'text':
+                    # to_date returns NULL for unparseable input; the column is
+                    # NOT NULL so any NULL would abort the migration loudly
+                    # (which is the safe outcome -- better than silent corruption).
+                    await conn.execute(
+                        "ALTER TABLE citizens ALTER COLUMN join_date TYPE DATE "
+                        "USING to_date(join_date, 'DD/MM/YYYY')"
+                    )
+                    logger.info("Migrated citizens.join_date from TEXT to DATE.")
 
         logger.info("Database tables and indexes verified/created successfully.")
     except Exception as e:

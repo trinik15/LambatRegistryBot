@@ -5,8 +5,10 @@ from core import database as db
 from api import civinfo_api
 import utils
 from core.config import Config
-from datetime import datetime, timezone
+from core.constants import Limits
+from datetime import datetime, timezone, date
 import logging
+import re
 import time
 import asyncio
 from typing import Optional, List, Dict, Any
@@ -14,6 +16,9 @@ from utils import PaginationView
 from services import role_manager
 
 logger = logging.getLogger(__name__)
+
+# Minecraft username rules: 3-16 chars, alphanumeric + underscore.
+_IGN_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 class AutocompleteCache:
@@ -69,12 +74,25 @@ class CitizenRemoveConfirm(discord.ui.View):
                 await conn.execute("DELETE FROM citizens WHERE ign = $1", self.ign)
                 await conn.execute("DELETE FROM activity_cache WHERE ign = $1", self.ign)
 
+        # Role removal happens after the DB delete; surface failures honestly.
+        role_warning = None
         member = interaction.guild.get_member(int(self.discord_id))
         if member:
-            await role_manager.remove_all_citizen_roles(member, self.settlement)
+            try:
+                await role_manager.remove_all_citizen_roles(member, self.settlement)
+            except Exception as e:
+                role_warning = str(e) or e.__class__.__name__
+                logger.error(f"Failed to remove roles from {member} for deleted citizen {self.ign}: {e}", exc_info=True)
 
         self.cog.autocomplete_cache.invalidate_citizen_cache()
-        await interaction.followup.send(f"✅ Citizen `{self.ign}` has been removed.", ephemeral=True)
+        if role_warning:
+            await interaction.followup.send(
+                f"✅ Citizen `{self.ign}` has been removed from the registry.\n"
+                f"⚠️ Could not automatically strip Discord roles from <@{self.discord_id}>: `{role_warning}`. "
+                f"Please remove them manually.",
+                ephemeral=True)
+        else:
+            await interaction.followup.send(f"✅ Citizen `{self.ign}` has been removed.", ephemeral=True)
         self.stop()
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
@@ -105,12 +123,18 @@ class CitizenCog(commands.Cog):
     def has_full_access(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == Config.OWNER_ID:
             return True
+        # DM context: interaction.user is a User, not a Member, so it has no
+        # .roles — deny rather than crash with AttributeError.
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
         user_role_ids = [r.id for r in interaction.user.roles]
         return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
 
     def has_view_access(self, interaction: discord.Interaction) -> bool:
         if self.has_full_access(interaction):
             return True
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
         role_ids = [r.id for r in interaction.user.roles]
         return Config.VIEW_ACCESS_ROLE_ID in role_ids
 
@@ -135,8 +159,30 @@ class CitizenCog(commands.Cog):
         if not self.has_full_access(interaction):
             return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
 
-        if len(ign) > 16:
-            await interaction.response.send_message("❌ IGN must be at most 16 characters long (Minecraft username limit).", ephemeral=True)
+        # Validate IGN format (Minecraft username rules: 3-16 chars, [A-Za-z0-9_])
+        if not _IGN_PATTERN.match(ign) or not (3 <= len(ign) <= Limits.IGN_MAX_LENGTH):
+            await interaction.response.send_message(
+                "❌ IGN must be 3–16 characters and may only contain letters, numbers, and underscores.",
+                ephemeral=True)
+            return
+
+        # Enforce field length limits up front so we never hand Discord an
+        # embed field >1024 chars (which raises an opaque HTTP error) or store
+        # unbounded text in the DB.
+        if len(address) > Limits.ADDRESS_MAX:
+            await interaction.response.send_message(
+                f"❌ Address must be at most {Limits.ADDRESS_MAX} characters (got {len(address)}).",
+                ephemeral=True)
+            return
+        if len(mailbox) > Limits.MAILBOX_MAX:
+            await interaction.response.send_message(
+                f"❌ Mailbox must be at most {Limits.MAILBOX_MAX} characters (got {len(mailbox)}).",
+                ephemeral=True)
+            return
+        if len(notes) > Limits.NOTES_MAX:
+            await interaction.response.send_message(
+                f"❌ Notes must be at most {Limits.NOTES_MAX} characters (got {len(notes)}).",
+                ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -147,7 +193,8 @@ class CitizenCog(commands.Cog):
         if recruiter3:
             recruiters.append(str(recruiter3.id))
         recruiter_ids = ",".join(recruiters)
-        join_date = datetime.now().strftime("%d/%m/%Y")
+        join_date_obj = date.today()
+        join_date_display = join_date_obj.strftime("%d/%m/%Y")
 
         pool = await db.get_pool()
         async with pool.acquire() as conn:
@@ -184,7 +231,7 @@ class CitizenCog(commands.Cog):
                 await conn.execute(
                     "INSERT INTO citizens (ign, discord_id, settlement, recruiter_ids, address, mailbox, notes, join_date) "
                     "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                    ign, str(discord_user.id), settlement, recruiter_ids, address, mailbox, notes, join_date
+                    ign, str(discord_user.id), settlement, recruiter_ids, address, mailbox, notes, join_date_obj
                 )
 
                 if last_login:
@@ -194,15 +241,30 @@ class CitizenCog(commands.Cog):
                         ign, last_login, status
                     )
 
+        # Role assignment happens after the DB commit (the registry is the
+        # source of truth). If Discord role assignment fails we must NOT claim
+        # full success — surface the partial failure honestly so council can fix it.
+        role_error = None
         try:
             await role_manager.assign_citizen_roles(discord_user, settlement)
         except Exception as e:
-            logger.error(f"Failed to assign roles to {discord_user} for citizen {ign}: {e}")
+            role_error = str(e) or e.__class__.__name__
+            logger.error(f"Failed to assign roles to {discord_user} for citizen {ign}: {e}", exc_info=True)
 
         self.autocomplete_cache.invalidate_citizen_cache()
         self.autocomplete_cache.invalidate_settlement_cache()
 
-        embed = discord.Embed(title="✅ Citizen Registered", color=0x43B581)
+        if role_error:
+            embed = discord.Embed(
+                title="⚠️ Citizen Registered (role assignment failed)",
+                description=(
+                    f"`{ign}` was saved to the registry, but Discord roles could "
+                    f"not be assigned automatically."
+                ),
+                color=0xff9900
+            )
+        else:
+            embed = discord.Embed(title="✅ Citizen Registered", color=0x43B581)
         embed.add_field(name="IGN", value=ign, inline=True)
         embed.add_field(name="Discord", value=discord_user.mention, inline=True)
         embed.add_field(name="Settlement", value=settlement, inline=True)
@@ -214,7 +276,18 @@ class CitizenCog(commands.Cog):
         embed.add_field(name="Address", value=address, inline=False)
         embed.add_field(name="Mailbox", value=mailbox, inline=True)
         embed.add_field(name="Notes", value=notes, inline=False)
-        embed.add_field(name="Join Date", value=join_date, inline=True)
+        embed.add_field(name="Join Date", value=join_date_display, inline=True)
+        if role_error:
+            embed.add_field(
+                name="⚠️ Action Required",
+                value=(
+                    f"Discord role assignment failed:\n`{role_error}`\n\n"
+                    f"Please assign the citizen/settlement roles to {discord_user.mention} manually, "
+                    f"or check that the bot has the **Manage Roles** permission and its role is above "
+                    f"the roles it needs to assign."
+                ),
+                inline=False
+            )
         embed.set_thumbnail(url=self._skin_url(ign))
         await interaction.followup.send(embed=embed)
 
@@ -241,6 +314,23 @@ class CitizenCog(commands.Cog):
         old_row = await db.execute_query("SELECT * FROM citizens WHERE ign = $1", (ign,), fetch_one=True)
         if not old_row:
             await interaction.followup.send(f"❌ No citizen with IGN `{ign}`. Use `/citizen list` to see all citizens.", ephemeral=True)
+            return
+
+        # Validate field lengths for any provided values (post-defer, so use followup).
+        if address is not None and len(address) > Limits.ADDRESS_MAX:
+            await interaction.followup.send(
+                f"❌ Address must be at most {Limits.ADDRESS_MAX} characters (got {len(address)}).",
+                ephemeral=True)
+            return
+        if mailbox is not None and len(mailbox) > Limits.MAILBOX_MAX:
+            await interaction.followup.send(
+                f"❌ Mailbox must be at most {Limits.MAILBOX_MAX} characters (got {len(mailbox)}).",
+                ephemeral=True)
+            return
+        if notes is not None and len(notes) > Limits.NOTES_MAX:
+            await interaction.followup.send(
+                f"❌ Notes must be at most {Limits.NOTES_MAX} characters (got {len(notes)}).",
+                ephemeral=True)
             return
 
         changes = {}
@@ -297,10 +387,16 @@ class CitizenCog(commands.Cog):
             if not utils.is_valid_date(join_date):
                 await interaction.followup.send("❌ Invalid date format. Please use DD/MM/YYYY (e.g., 25/12/2024).", ephemeral=True)
                 return
-            if join_date != old_join_date:
+            new_join_date_obj = utils.parse_join_date(join_date)
+            if new_join_date_obj is None:
+                await interaction.followup.send("❌ Invalid date. Please use DD/MM/YYYY (e.g., 25/12/2024).", ephemeral=True)
+                return
+            # old_join_date is a DATE object after migration; normalise for compare
+            old_jd_obj = utils.parse_join_date(old_join_date) if not hasattr(old_join_date, "year") else old_join_date
+            if old_jd_obj is None or new_join_date_obj != old_jd_obj:
                 updates.append(f"join_date = ${len(params)+1}")
-                params.append(join_date)
-                changes["Join Date"] = (old_join_date, join_date)
+                params.append(new_join_date_obj)
+                changes["Join Date"] = (utils.format_date(old_join_date), join_date)
 
         if any([recruiter1, recruiter2, recruiter3]):
             new_recruiters = []
@@ -334,20 +430,46 @@ class CitizenCog(commands.Cog):
         civinfo_api.cache.cache.pop(ign, None)
         self.autocomplete_cache.invalidate_citizen_cache()
 
+        # Role changes happen after the DB commit. Collect any failures so we
+        # can surface them honestly instead of silently leaving stale roles.
+        role_warnings = []
         guild = interaction.guild
         if change_user:
-            old_member = guild.get_member(int(old_discord_id))
-            if old_member:
-                await role_manager.remove_all_citizen_roles(old_member, old_settlement)
-            await role_manager.assign_citizen_roles(discord_user, settlement)
+            try:
+                old_member = guild.get_member(int(old_discord_id))
+                if old_member:
+                    await role_manager.remove_all_citizen_roles(old_member, old_settlement)
+                # If only the Discord user changed (not the settlement), the
+                # new user must still receive their EXISTING settlement role —
+                # `settlement` is None in that case, so fall back to old_settlement.
+                effective_settlement = settlement if change_settlement else old_settlement
+                await role_manager.assign_citizen_roles(discord_user, effective_settlement)
+            except Exception as e:
+                role_warnings.append(f"Discord user/role swap failed: `{e}`")
+                logger.error(f"Failed to swap roles for {ign} (user change): {e}", exc_info=True)
         elif change_settlement:
-            member = guild.get_member(int(old_discord_id))
-            if member:
-                await role_manager.update_settlement_role(member, old_settlement, settlement)
+            try:
+                member = guild.get_member(int(old_discord_id))
+                if member:
+                    await role_manager.update_settlement_role(member, old_settlement, settlement)
+            except Exception as e:
+                role_warnings.append(f"Settlement role update failed: `{e}`")
+                logger.error(f"Failed to update settlement role for {ign}: {e}", exc_info=True)
 
         embed = discord.Embed(title=f"✅ Updated {ign}", color=0x43B581)
         for field, (old, new) in changes.items():
             embed.add_field(name=field, value=f"~~{old}~~ → **{new}**", inline=False)
+        if role_warnings:
+            embed.color = 0xff9900
+            embed.add_field(
+                name="⚠️ Role Warnings",
+                value=(
+                    "The registry was updated, but one or more Discord role changes failed:\n"
+                    + "\n".join(role_warnings)
+                    + "\nPlease adjust roles manually if needed."
+                ),
+                inline=False
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"Citizen {ign} updated by {interaction.user} (ID: {interaction.user.id}): {changes}")
 
@@ -403,12 +525,36 @@ class CitizenCog(commands.Cog):
 
         embeds = []
         for settlement, citizens in settlements.items():
-            embed = discord.Embed(title=f"🏘️ {settlement}", color=0x7289DA)
-            citizen_list = "\n".join(citizens)
-            if len(citizen_list) > 1024:
-                citizen_list = citizen_list[:1021] + "..."
-            embed.add_field(name=f"Citizens ({len(citizens)})", value=citizen_list, inline=False)
-            embeds.append(embed)
+            # Chunk citizens so each embed field stays under Discord's 1024-char
+            # limit WITHOUT slicing mid-name (old code did citizen_list[:1021]
+            # which cut usernames in half and silently dropped people).
+            chunks = []
+            current = []
+            current_len = 0
+            for name in citizens:
+                entry_len = len(name) + 1  # +1 for the joining newline
+                if current and current_len + entry_len > 1000:
+                    chunks.append(current)
+                    current = [name]
+                    current_len = entry_len
+                else:
+                    current.append(name)
+                    current_len += entry_len
+            if current:
+                chunks.append(current)
+            if not chunks:
+                chunks = [[]]
+
+            num_chunks = len(chunks)
+            for idx, chunk in enumerate(chunks, start=1):
+                part_label = f" ({idx}/{num_chunks})" if num_chunks > 1 else ""
+                embed = discord.Embed(title=f"🏘️ {settlement}{part_label}", color=0x7289DA)
+                value = "\n".join(chunk) if chunk else "None"
+                embed.add_field(
+                    name=f"Citizens ({len(citizens)} total, showing {len(chunk)})",
+                    value=value, inline=False
+                )
+                embeds.append(embed)
 
         view = PaginationView(embeds, interaction.user)
         await interaction.followup.send(embed=embeds[0], view=view)
@@ -438,7 +584,7 @@ class CitizenCog(commands.Cog):
         embed = discord.Embed(title=f"📄 Dossier: {ign}", color=0x7289DA)
         embed.add_field(name="Discord", value=f"<@{row['discord_id']}>", inline=True)
         embed.add_field(name="Settlement", value=row["settlement"], inline=True)
-        embed.add_field(name="Join Date", value=row["join_date"], inline=True)
+        embed.add_field(name="Join Date", value=utils.format_date(row["join_date"]), inline=True)
         embed.add_field(name="Address", value=row["address"], inline=False)
         embed.add_field(name="Mailbox", value=row["mailbox"], inline=True)
         embed.add_field(name="Recruiters", value=recruiter_mentions, inline=True)
