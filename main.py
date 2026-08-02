@@ -10,6 +10,7 @@ from core.config import Config
 from core import database as db
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
+from web.http_keepalive import start_http_server
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,6 +67,23 @@ class PaviaBot(commands.Bot):
             logger.info(f"daily_check started: {self.activity_monitor.daily_check.is_running()}")
         else:
             logger.error("Failed to initialize daily_check")
+
+        # 3b. Start the scheduled daily database backup loop.
+        #     (Previously defined but never .start()-ed, so daily backups silently
+        #      never ran. See daily_backup / before_daily_backup below.)
+        try:
+            self.daily_backup.start()
+            logger.info(f"daily_backup started: {self.daily_backup.is_running()}")
+        except Exception as e:
+            logger.error(f"Failed to start daily_backup loop: {e}", exc_info=True)
+
+        # 3c. Start the HTTP keep-alive server so the host platform (e.g. Render)
+        #     does not mark the service as idle and shut it down.
+        try:
+            start_http_server()
+            logger.info(f"HTTP keep-alive server started on port {os.environ.get('PORT', 10000)}.")
+        except Exception as e:
+            logger.warning(f"Failed to start HTTP keep-alive server: {e}")
 
         # 4. Load all cogs
         for filename in os.listdir("cogs"):
@@ -153,6 +171,11 @@ class PaviaBot(commands.Bot):
         if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
             self.activity_monitor.daily_check.cancel()
             logger.info("Stopped daily_check loop")
+
+        # Stop the daily_backup loop if it's running
+        if self.daily_backup.is_running():
+            self.daily_backup.cancel()
+            logger.info("Stopped daily_backup loop")
 
         # Close HTTP session
         if self.http_session and not self.http_session.closed:

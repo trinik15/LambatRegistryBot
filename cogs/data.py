@@ -4,6 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 from core.config import Config
 from services import backup
+from api import civinfo_api
 import logging
 import os
 from typing import Optional
@@ -22,9 +23,44 @@ class DataCog(commands.Cog):
         # Owner has full access
         if interaction.user.id == Config.OWNER_ID:
             return True
+        # DM context: no roles available — deny (only owner passes above).
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
         # Check if user has any of the full access roles
         user_role_ids = [r.id for r in interaction.user.roles]
         return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
+
+    def invalidate_all_caches(self):
+        """Drop every in-memory cache after a DB restore replaces the data.
+
+        Without this the autocomplete lists, settlement cache and CivInfo
+        activity cache would keep serving the *pre-restore* state until their
+        TTLs expired — i.e. the bot would lie about data that no longer exists.
+        """
+        # CivInfo activity cache (per-IGN lookups).
+        try:
+            civinfo_api.cache.clear()
+        except Exception as e:
+            logger.warning(f"Could not clear CivInfo cache: {e}")
+
+        # CitizenCog autocomplete cache (IGN + settlement name lists).
+        citizen_cog = self.bot.get_cog("CitizenCog")
+        if citizen_cog and getattr(citizen_cog, "autocomplete_cache", None):
+            try:
+                citizen_cog.autocomplete_cache.invalidate_citizen_cache()
+                citizen_cog.autocomplete_cache.invalidate_settlement_cache()
+            except Exception as e:
+                logger.warning(f"Could not clear CitizenCog cache: {e}")
+
+        # SettlementCog name cache.
+        settlement_cog = self.bot.get_cog("SettlementCog")
+        if settlement_cog and hasattr(settlement_cog, "invalidate_cache"):
+            try:
+                settlement_cog.invalidate_cache()
+            except Exception as e:
+                logger.warning(f"Could not clear SettlementCog cache: {e}")
+
+        logger.info("All in-memory caches invalidated after restore.")
 
     async def backup_autocomplete(self, interaction: discord.Interaction, current: str):
         """Autocomplete for backup filenames."""
@@ -150,16 +186,30 @@ class DataCog(commands.Cog):
 
                 await interaction.response.defer(ephemeral=True)
                 try:
+                    # restore_backup now RAISES on any failure (missing file,
+                    # pg_dump/psql error, or timeout) instead of returning False,
+                    # so reaching the success branch means it really succeeded.
                     await backup.restore_backup(filename)
+                    # The DB was replaced under us — drop every stale cache so
+                    # autocomplete / activity lookups reflect the restored data.
+                    self.cog.invalidate_all_caches()
                     embed = discord.Embed(
                         title="✅ Database Restored",
-                        description=f"Successfully restored from `{filename}`.",
+                        description=(
+                            f"Successfully restored from `{filename}`.\n"
+                            f"All in-memory caches have been cleared."
+                        ),
                         color=0x43B581
                     )
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 except Exception as e:
                     logger.error(f"Restore failed: {e}", exc_info=True)
-                    await interaction.followup.send(f"❌ Restore failed: {e}", ephemeral=True)
+                    await interaction.followup.send(
+                        f"❌ Restore failed: {e}\n\n"
+                        f"An emergency backup was attempted before the restore; "
+                        f"check the backups folder.",
+                        ephemeral=True
+                    )
                 self.stop()
 
             @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)

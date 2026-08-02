@@ -3,6 +3,9 @@ import http.server
 import socketserver
 import os
 import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 PORT = int(os.environ.get('PORT', 10000))
 
@@ -17,8 +20,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 def run_http_server():
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        httpd.serve_forever()
+    try:
+        with socketserver.TCPServer(("", PORT), Handler) as httpd:
+            logger.info(f"HTTP keep-alive server listening on port {PORT}")
+            httpd.serve_forever()
+    except Exception as e:
+        # Never crash the bot if the keep-alive port is unavailable
+        # (e.g. already in use, or PORT not set in the current environment).
+        logger.warning(f"HTTP keep-alive server could not bind to port {PORT}: {e}")
 
 def start_http_server():
     thread = threading.Thread(target=run_http_server, daemon=True)

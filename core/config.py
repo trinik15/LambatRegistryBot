@@ -28,6 +28,11 @@ class Config:
     REGISTRY_CHANNEL_ID = int(os.getenv("REGISTRY_CHANNEL_ID", 0))
     AUDIT_LOG_CHANNEL_ID = int(os.getenv("AUDIT_LOG_CHANNEL_ID", 0))
 
+    # Monthly census report destination
+    # Channel that receives the monthly population snapshot, and the role to ping.
+    MONTHLY_REPORT_CHANNEL_ID = int(os.getenv("MONTHLY_REPORT_CHANNEL_ID", 0))
+    MONTHLY_REPORT_ROLE_ID = int(os.getenv("MONTHLY_REPORT_ROLE_ID", 0))
+
     # Network & Performance
     AIOHTTP_TOTAL_TIMEOUT = int(os.getenv("AIOHTTP_TOTAL_TIMEOUT", 5))
     AIOHTTP_CONNECT_TIMEOUT = int(os.getenv("AIOHTTP_CONNECT_TIMEOUT", 3))

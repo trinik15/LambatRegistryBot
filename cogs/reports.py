@@ -2,16 +2,24 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from core import database as db
-from api import civinfo_api
 from core.config import Config
+from tasks.activity_monitor import _fetch_activities
 import logging
 import csv
 import io
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from collections import defaultdict
 import utils
 
 logger = logging.getLogger(__name__)
+
+# Discord caps a single embed field value at 1024 chars. We show at most 20
+# citizens per field (each line ~30 chars) and cap the whole report at 25
+# embeds/pages — generous enough for a typical nation's settlements, and the
+# PaginationView navigates them one embed at a time (so Discord's 10-embeds-
+# per-message limit never applies). If we exceed the cap we say so honestly.
+CITIZENS_PER_FIELD = 20
+MAX_EMBEDS = 25
 
 
 class ReportsCog(commands.Cog):
@@ -23,6 +31,9 @@ class ReportsCog(commands.Cog):
     def has_view_access(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == Config.OWNER_ID:
             return True
+        # DM context: no roles to check — deny (owner is handled above).
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
         role_ids = [r.id for r in interaction.user.roles]
         return Config.VIEW_ACCESS_ROLE_ID in role_ids
 
@@ -60,59 +71,92 @@ class ReportsCog(commands.Cog):
             return
 
         # Group by settlement for display
-        from collections import defaultdict
         settlements_data = defaultdict(list)
         for row in rows:
             settlements_data[row["settlement"]].append(row)
 
-        # Create paginated embeds
+        # Fetch activity for EVERY citizen in one concurrent batch (was a
+        # sequential await per citizen — slow enough to risk Discord's
+        # interaction token expiry on big registries).
+        all_igns = [row["ign"] for row in rows]
+        activities = await _fetch_activities(all_igns, self.bot.http_session)
+
         embeds = []
         total_citizens = len(rows)
-        processed = 0
+        shown_citizens = 0
+        truncated = False
 
         for settlement_name, citizens in settlements_data.items():
-            # Fetch activity status for each citizen (this is expensive - do in batches)
+            if len(embeds) >= MAX_EMBEDS:
+                truncated = True
+                break
+
+            # Activity summary is computed once for the whole settlement.
             activity_data = {}
             for citizen in citizens:
                 ign = citizen["ign"]
-                status, emoji, last_login, status_text = await civinfo_api.get_player_activity(ign, self.bot.http_session)
-                activity_data[ign] = {"emoji": emoji, "status": status_text}
+                status, emoji, last_login, status_text = activities.get(
+                    ign, ("error", "⚪", None, "Error"))
+                activity_data[ign] = {"emoji": emoji, "status": status_text, "raw_status": status}
 
-            active_count = sum(1 for data in activity_data.values() if data["status"] == "Active")
+            # civinfo_api returns emoji 🟢 (active <30d), 🟠 (semi 30-60d),
+            # 🔴 (inactive >60d), ⚪ (unknown/error). The status_text is never
+            # the literal "Active", so we must key off the emoji — not the text.
+            active_count = sum(1 for d in activity_data.values() if d["emoji"] == "🟢")
+            semi_count = sum(1 for d in activity_data.values() if d["emoji"] == "🟠")
+            inactive_count = sum(1 for d in activity_data.values() if d["emoji"] == "🔴")
+            unknown_count = len(citizens) - active_count - semi_count - inactive_count
 
-            embed = discord.Embed(
-                title=f"{title} - {settlement_name}",
-                color=0x7289DA
+            activity_field = (
+                f"🟢 Active: {active_count}\n"
+                f"🟠 Semi-Active: {semi_count}\n"
+                f"🔴 Inactive: {inactive_count}\n"
+                f"⚪ Unknown: {unknown_count}"
             )
 
-            citizen_lines = []
-            for citizen in citizens:
-                ign = citizen["ign"]
-                activity = activity_data[ign]
-                citizen_lines.append(f"{activity['emoji']} **{ign}**")
-                if len(citizen_lines) == 20:  # Limit per page
+            # Chunk citizens so we actually show all of them instead of lying
+            # about the count (old code broke after 20 but reported len(citizens)).
+            chunks = [citizens[i:i + CITIZENS_PER_FIELD]
+                      for i in range(0, len(citizens), CITIZENS_PER_FIELD)] or [[]]
+            num_chunks = len(chunks)
+
+            for idx, chunk in enumerate(chunks, start=1):
+                if len(embeds) >= MAX_EMBEDS:
+                    truncated = True
                     break
 
-            if citizen_lines:
-                embed.add_field(
-                    name=f"Citizens ({len(citizens)})",
-                    value="\n".join(citizen_lines),
-                    inline=True
+                part_label = f" ({idx}/{num_chunks})" if num_chunks > 1 else ""
+                embed = discord.Embed(
+                    title=f"{title} - {settlement_name}{part_label}",
+                    color=0x7289DA
                 )
-                embed.add_field(
-                    name="Activity",
-                    value=f"🟢 Active: {active_count}\n🔴 Inactive: {len(citizens) - active_count}",
-                    inline=True
+                if chunk:
+                    citizen_lines = []
+                    for citizen in chunk:
+                        ign = citizen["ign"]
+                        activity = activity_data[ign]
+                        citizen_lines.append(f"{activity['emoji']} **{ign}**")
+                    embed.add_field(
+                        name=f"Citizens ({len(citizens)} total, showing {len(chunk)})",
+                        value="\n".join(citizen_lines),
+                        inline=True
+                    )
+                    embed.add_field(name="Activity", value=activity_field, inline=True)
+                    shown_citizens += len(chunk)
+                else:
+                    embed.add_field(name="Citizens", value="None", inline=True)
+
+                embed.set_footer(
+                    text=f"Total citizens: {total_citizens} | Listed so far: {shown_citizens}/{total_citizens}"
                 )
-            else:
-                embed.add_field(name="Citizens", value="None", inline=True)
+                embeds.append(embed)
 
-            processed += len(citizens)
-            embed.set_footer(text=f"Total citizens: {total_citizens} | Showing {processed}/{total_citizens}")
-            embeds.append(embed)
-
-            if len(embeds) >= 25:  # Discord embed limit per message
-                break
+        if truncated:
+            # Annotate the final embed so the user knows data was omitted,
+            # rather than silently dropping settlements.
+            last = embeds[-1]
+            note = last.footer.text or ""
+            last.set_footer(text=f"{note} | ⚠️ Report truncated ({MAX_EMBEDS}-page limit) — refine with /report census <settlement>")
 
         view = utils.PaginationView(embeds, interaction.user, timeout=300)
         await interaction.followup.send(embed=embeds[0], view=view)
@@ -140,10 +184,11 @@ class ReportsCog(commands.Cog):
         total_settlements = settlement_count[0] if settlement_count else 0
 
         # Get recent joins (last 30 days)
-        recent_cutoff = (datetime.now() - timedelta(days=30)).strftime("%d/%m/%Y")
+        # join_date is a real DATE column (migrated from TEXT), so we can
+        # compare chronologically instead of lexicographically.
         recent_result = await db.execute_query(
-            "SELECT COUNT(*) FROM citizens WHERE join_date >= $1",
-            (recent_cutoff,), fetch_one=True
+            "SELECT COUNT(*) FROM citizens WHERE join_date >= CURRENT_DATE - INTERVAL '30 days'",
+            fetch_one=True
         )
         recent_joins = recent_result[0] if recent_result else 0
 
@@ -190,7 +235,7 @@ class ReportsCog(commands.Cog):
                 row["ign"],
                 row["discord_id"],
                 row["settlement"],
-                row["join_date"],
+                utils.format_date(row["join_date"]),
                 row.get("address", ""),
                 row.get("mailbox", "")
             ])

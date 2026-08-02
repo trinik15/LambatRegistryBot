@@ -20,6 +20,9 @@ class SettlementCog(commands.Cog):
     def has_full_access(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == Config.OWNER_ID:
             return True
+        # DM context: interaction.user has no .roles — deny rather than crash.
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
         user_role_ids = [r.id for r in interaction.user.roles]
         return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
 
