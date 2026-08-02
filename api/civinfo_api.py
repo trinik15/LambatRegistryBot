@@ -1,6 +1,6 @@
 import aiohttp
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from typing import Optional, Tuple
 
@@ -32,7 +32,7 @@ class CivInfoCache:
         """Return (status, emoji, last_login, status_text) if cached and fresh."""
         if ign in self.cache:
             data, timestamp, ttl = self.cache[ign]
-            if datetime.now().timestamp() - timestamp < ttl:
+            if datetime.now(timezone.utc).timestamp() - timestamp < ttl:
                 return data
             else:
                 del self.cache[ign]
@@ -46,7 +46,7 @@ class CivInfoCache:
         doesn't blacklist a player for the full success TTL.
         """
         actual_ttl = ttl if ttl is not None else self.ttl
-        self.cache[ign] = (data, datetime.now().timestamp(), actual_ttl)
+        self.cache[ign] = (data, datetime.now(timezone.utc).timestamp(), actual_ttl)
 
     def clear(self):
         """Drop every cached entry (e.g. after a database restore)."""
@@ -76,7 +76,7 @@ def is_auth_broken() -> bool:
     global _auth_broken_until
     if not _auth_broken_until:
         return False
-    if datetime.now().timestamp() > _auth_broken_until:
+    if datetime.now(timezone.utc).timestamp() > _auth_broken_until:
         # TTL expired — allow a retry; the warning may fire again if still broken.
         _auth_broken_until = 0.0
         return False
@@ -86,7 +86,7 @@ def is_auth_broken() -> bool:
 def _mark_auth_broken(reason: str):
     """Record that the API rejected our auth, logging loudly once per window."""
     global _auth_broken_until, _auth_warned
-    _auth_broken_until = datetime.now().timestamp() + AUTH_BROKEN_TTL
+    _auth_broken_until = datetime.now(timezone.utc).timestamp() + AUTH_BROKEN_TTL
     if not _auth_warned:
         logger.error(
             "CivInfo API auth failed: %s. Activity data will be unavailable "
@@ -190,8 +190,8 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Tuple
                 return result
 
             last_ts = max(valid_timestamps) / 1000.0
-            last_date = datetime.fromtimestamp(last_ts)
-            days_ago = (datetime.now() - last_date).days
+            last_date = datetime.fromtimestamp(last_ts, tz=timezone.utc)
+            days_ago = (datetime.now(timezone.utc) - last_date).days
 
             if days_ago < 30:
                 emoji, text = "🟢", f"Active ({days_ago}d ago)" if days_ago > 0 else "Active (today)"

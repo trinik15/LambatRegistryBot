@@ -205,9 +205,8 @@ class DataCog(commands.Cog):
                 except Exception as e:
                     logger.error(f"Restore failed: {e}", exc_info=True)
                     await interaction.followup.send(
-                        f"❌ Restore failed: {e}\n\n"
-                        f"An emergency backup was attempted before the restore; "
-                        f"check the backups folder.",
+                        "❌ Restore failed. An emergency backup was attempted before "
+                        "the restore — check the backups folder. See bot logs for details.",
                         ephemeral=True
                     )
                 self.stop()

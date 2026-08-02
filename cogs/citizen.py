@@ -193,7 +193,7 @@ class CitizenCog(commands.Cog):
         if recruiter3:
             recruiters.append(str(recruiter3.id))
         recruiter_ids = ",".join(recruiters)
-        join_date_obj = date.today()
+        join_date_obj = datetime.now(timezone.utc).date()
         join_date_display = join_date_obj.strftime("%d/%m/%Y")
 
         pool = await db.get_pool()
@@ -220,11 +220,19 @@ class CitizenCog(commands.Cog):
                         ephemeral=True)
                     return
 
+                # CivInfo lookup validates that the IGN actually exists on CivMC
+                # and seeds the activity cache. We only HARD-block on
+                # "not_found" (the IGN doesn't exist — likely a typo). If the
+                # API itself is down or auth-broken ("error"), we still
+                # register the citizen (the registry is the source of truth,
+                # not CivInfo) and surface a warning so council knows the
+                # activity wasn't verified.
+                civinfo_warning = None
                 status, emoji, last_login, status_text = await civinfo_api.get_player_activity(ign, self.bot.http_session)
                 if status == "error":
-                    await interaction.followup.send("❌ CivInfo API is currently unavailable. Please try again later.", ephemeral=True)
-                    return
-                if status == "not_found":
+                    civinfo_warning = status_text or "CivInfo unavailable"
+                    last_login = None
+                elif status == "not_found":
                     await interaction.followup.send("❌ IGN not found on CivInfo. Please check the name and try again.", ephemeral=True)
                     return
 
@@ -254,12 +262,13 @@ class CitizenCog(commands.Cog):
         self.autocomplete_cache.invalidate_citizen_cache()
         self.autocomplete_cache.invalidate_settlement_cache()
 
-        if role_error:
+        if role_error or civinfo_warning:
             embed = discord.Embed(
-                title="⚠️ Citizen Registered (role assignment failed)",
+                title="⚠️ Citizen Registered (with warnings)",
                 description=(
-                    f"`{ign}` was saved to the registry, but Discord roles could "
-                    f"not be assigned automatically."
+                    f"`{ign}` was saved to the registry."
+                    + (" Discord roles could not be assigned automatically." if role_error else "")
+                    + (" CivInfo activity could not be verified." if civinfo_warning else "")
                 ),
                 color=0xff9900
             )
@@ -285,6 +294,16 @@ class CitizenCog(commands.Cog):
                     f"Please assign the citizen/settlement roles to {discord_user.mention} manually, "
                     f"or check that the bot has the **Manage Roles** permission and its role is above "
                     f"the roles it needs to assign."
+                ),
+                inline=False
+            )
+        if civinfo_warning:
+            embed.add_field(
+                name="ℹ️ Activity Unverified",
+                value=(
+                    f"CivInfo could not verify this player's activity (`{civinfo_warning}`). "
+                    f"The citizen is registered, but their activity status will show as Unknown "
+                    f"until CivInfo is available again."
                 ),
                 inline=False
             )
@@ -558,6 +577,7 @@ class CitizenCog(commands.Cog):
 
         view = PaginationView(embeds, interaction.user)
         await interaction.followup.send(embed=embeds[0], view=view)
+        view.message = await interaction.original_response()
 
     @citizen_group.command(name="dossier", description="Show detailed citizen information")
     @app_commands.autocomplete(ign=citizen_autocomplete)
@@ -590,7 +610,7 @@ class CitizenCog(commands.Cog):
         embed.add_field(name="Recruiters", value=recruiter_mentions, inline=True)
         embed.add_field(name="Activity", value=f"{emoji} {status_text}", inline=True)
         if last_login:
-            embed.add_field(name="Last Login", value=last_login, inline=True)
+            embed.add_field(name="Last Login", value=utils.format_date(last_login, "%Y-%m-%d %H:%M"), inline=True)
         if row["notes"] != "None":
             embed.add_field(name="Notes", value=row["notes"], inline=False)
         embed.set_thumbnail(url=self._skin_url(ign))

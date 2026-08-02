@@ -1,11 +1,11 @@
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 import logging
 import os
 import aiohttp
-import traceback
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from core.config import Config
 from core import database as db
 from services import backup
@@ -28,7 +28,8 @@ class PaviaBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.members = True
-        intents.message_content = True
+        # message_content is NOT needed — this bot is slash-command-only.
+        # Keeping it off follows the principle of least privilege.
         proxy_url = os.getenv("PROXY_URL")
         super().__init__(
             command_prefix="!",
@@ -107,12 +108,21 @@ class PaviaBot(commands.Bot):
                     logger.error(f"Failed to load cog {cog_name}: {e}", exc_info=True)
 
         # 5. Sync command tree
-        await self.tree.sync()
-        logger.info("All cogs loaded and synced.")
+        # Guild-scoped sync is instant; global sync can take up to 1 hour.
+        # For a single-server nation bot, GUILD_ID should be set in .env.
+        if Config.GUILD_ID:
+            guild = discord.Object(id=Config.GUILD_ID)
+            self.tree.copy_global_to(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            logger.info(f"Synced {len(synced)} commands to guild {Config.GUILD_ID} (instant).")
+        else:
+            synced = await self.tree.sync()
+            logger.info(f"Synced {len(synced)} commands globally (may take up to 1h to propagate). "
+                        f"Set GUILD_ID in .env for instant updates.")
         commands_list = [cmd.name for cmd in self.tree.get_commands()]
         logger.info(f"Registered commands: {commands_list}")
 
-        # Set custom error handler for rate limits
+        # Set custom error handler for app command errors (rate limits, etc.)
         self.tree.on_error = self.on_app_command_error
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
@@ -165,7 +175,9 @@ class PaviaBot(commands.Bot):
     @daily_backup.before_loop
     async def before_daily_backup(self):
         await self.wait_until_ready()
-        now = datetime.now()
+        # Schedule for 02:00 UTC (consistent across deployments regardless of
+        # the host's local timezone). Override by changing the hour below.
+        now = datetime.now(timezone.utc)
         target = now.replace(hour=2, minute=0, second=0, microsecond=0)
         if now > target:
             target += timedelta(days=1)

@@ -29,7 +29,6 @@ class SettlementCog(commands.Cog):
     async def get_settlement_names(self):
         """Get cached settlement names."""
         import time
-        from datetime import datetime, timezone
         now = time.time()
         if self._settlement_cache is None or now - self._cache_timestamp > self._cache_ttl:
             rows = await db.execute_query("SELECT name FROM settlements ORDER BY name", fetch_all=True)
@@ -53,8 +52,11 @@ class SettlementCog(commands.Cog):
         if not self.has_full_access(interaction):
             return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
 
-        if len(name) > 50:
-            await interaction.response.send_message("❌ Settlement name must be at most 50 characters.", ephemeral=True)
+        from core.constants import Limits
+        if len(name) > Limits.SETTLEMENT_NAME_MAX or len(name) < 2:
+            await interaction.response.send_message(
+                f"❌ Settlement name must be 2–{Limits.SETTLEMENT_NAME_MAX} characters.",
+                ephemeral=True)
             return
 
         await interaction.response.defer()
