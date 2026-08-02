@@ -20,13 +20,15 @@ class SettlementCog(commands.Cog):
     def has_full_access(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == Config.OWNER_ID:
             return True
+        # DM context: interaction.user has no .roles — deny rather than crash.
+        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+            return False
         user_role_ids = [r.id for r in interaction.user.roles]
         return any(role_id in Config.FULL_ACCESS_ROLE_IDS for role_id in user_role_ids)
 
     async def get_settlement_names(self):
         """Get cached settlement names."""
         import time
-        from datetime import datetime, timezone
         now = time.time()
         if self._settlement_cache is None or now - self._cache_timestamp > self._cache_ttl:
             rows = await db.execute_query("SELECT name FROM settlements ORDER BY name", fetch_all=True)
@@ -50,8 +52,11 @@ class SettlementCog(commands.Cog):
         if not self.has_full_access(interaction):
             return await interaction.response.send_message("❌ You need the Council role to use this command.", ephemeral=True)
 
-        if len(name) > 50:
-            await interaction.response.send_message("❌ Settlement name must be at most 50 characters.", ephemeral=True)
+        from core.constants import Limits
+        if len(name) > Limits.SETTLEMENT_NAME_MAX or len(name) < 2:
+            await interaction.response.send_message(
+                f"❌ Settlement name must be 2–{Limits.SETTLEMENT_NAME_MAX} characters.",
+                ephemeral=True)
             return
 
         await interaction.response.defer()

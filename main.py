@@ -1,15 +1,17 @@
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
 import logging
 import os
 import aiohttp
-import traceback
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from core.config import Config
 from core import database as db
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
+from tasks.uptime_monitor import UptimeMonitor
+from web.http_keepalive import start_http_server
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,7 +28,8 @@ class PaviaBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.members = True
-        intents.message_content = True
+        # message_content is NOT needed — this bot is slash-command-only.
+        # Keeping it off follows the principle of least privilege.
         proxy_url = os.getenv("PROXY_URL")
         super().__init__(
             command_prefix="!",
@@ -35,6 +38,7 @@ class PaviaBot(commands.Bot):
         )
         self.http_session = None
         self.activity_monitor = None
+        self.uptime_monitor = None
 
     async def setup_hook(self):
         """
@@ -67,6 +71,32 @@ class PaviaBot(commands.Bot):
         else:
             logger.error("Failed to initialize daily_check")
 
+        # 3b. Start the scheduled daily database backup loop.
+        #     (Previously defined but never .start()-ed, so daily backups silently
+        #      never ran. See daily_backup / before_daily_backup below.)
+        try:
+            self.daily_backup.start()
+            logger.info(f"daily_backup started: {self.daily_backup.is_running()}")
+        except Exception as e:
+            logger.error(f"Failed to start daily_backup loop: {e}", exc_info=True)
+
+        # 3c. Start the CivMC uptime monitor (edge-triggered outage alerts).
+        #     Polls mcsrvstat.us every UPTIME_CHECK_INTERVAL seconds and posts
+        #     to ALERT_CHANNEL_ID only on online<->offline transitions.
+        try:
+            self.uptime_monitor = UptimeMonitor(self)
+            self.uptime_monitor.start()
+        except Exception as e:
+            logger.error(f"Failed to start uptime_monitor: {e}", exc_info=True)
+
+        # 3d. Start the HTTP keep-alive server so the host platform (e.g. Render)
+        #     does not mark the service as idle and shut it down.
+        try:
+            start_http_server()
+            logger.info(f"HTTP keep-alive server started on port {os.environ.get('PORT', 10000)}.")
+        except Exception as e:
+            logger.warning(f"Failed to start HTTP keep-alive server: {e}")
+
         # 4. Load all cogs
         for filename in os.listdir("cogs"):
             if filename.endswith(".py") and not filename.startswith("__"):
@@ -78,12 +108,21 @@ class PaviaBot(commands.Bot):
                     logger.error(f"Failed to load cog {cog_name}: {e}", exc_info=True)
 
         # 5. Sync command tree
-        await self.tree.sync()
-        logger.info("All cogs loaded and synced.")
+        # Guild-scoped sync is instant; global sync can take up to 1 hour.
+        # For a single-server nation bot, GUILD_ID should be set in .env.
+        if Config.GUILD_ID:
+            guild = discord.Object(id=Config.GUILD_ID)
+            self.tree.copy_global_to(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            logger.info(f"Synced {len(synced)} commands to guild {Config.GUILD_ID} (instant).")
+        else:
+            synced = await self.tree.sync()
+            logger.info(f"Synced {len(synced)} commands globally (may take up to 1h to propagate). "
+                        f"Set GUILD_ID in .env for instant updates.")
         commands_list = [cmd.name for cmd in self.tree.get_commands()]
         logger.info(f"Registered commands: {commands_list}")
 
-        # Set custom error handler for rate limits
+        # Set custom error handler for app command errors (rate limits, etc.)
         self.tree.on_error = self.on_app_command_error
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
@@ -136,7 +175,9 @@ class PaviaBot(commands.Bot):
     @daily_backup.before_loop
     async def before_daily_backup(self):
         await self.wait_until_ready()
-        now = datetime.now()
+        # Schedule for 02:00 UTC (consistent across deployments regardless of
+        # the host's local timezone). Override by changing the hour below.
+        now = datetime.now(timezone.utc)
         target = now.replace(hour=2, minute=0, second=0, microsecond=0)
         if now > target:
             target += timedelta(days=1)
@@ -153,6 +194,15 @@ class PaviaBot(commands.Bot):
         if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
             self.activity_monitor.daily_check.cancel()
             logger.info("Stopped daily_check loop")
+
+        # Stop the daily_backup loop if it's running
+        if self.daily_backup.is_running():
+            self.daily_backup.cancel()
+            logger.info("Stopped daily_backup loop")
+
+        # Stop the uptime monitor if it's running
+        if self.uptime_monitor:
+            self.uptime_monitor.stop()
 
         # Close HTTP session
         if self.http_session and not self.http_session.closed:
