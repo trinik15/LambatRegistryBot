@@ -1,12 +1,14 @@
+import asyncio
+import contextlib
+import logging
 import os
 import re
-import asyncio
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
+
 from core.config import Config
 from services.backup_sinks import upload_to_sink
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ def _safe_backup_path(filename: str) -> str:
 
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
+
 def _parse_db_url(url):
     """Parsa DATABASE_URL e restituisce (user, password, host, port, dbname)."""
     parsed = urlparse(url)
@@ -53,13 +56,13 @@ def _parse_db_url(url):
     password = parsed.password
     host = parsed.hostname
     port = parsed.port or 5432
-    dbname = parsed.path.lstrip('/')
+    dbname = parsed.path.lstrip("/")
     return user, password, host, port, dbname
 
 
 async def create_backup(backup_type="manual", note=""):
     """Create a database backup using pg_dump."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     safe_note = f"_{_sanitize_note(note)}" if note else ""
     filename = f"{backup_type}_{timestamp}{safe_note}.sql"
     backup_path = _safe_backup_path(filename)
@@ -69,10 +72,14 @@ async def create_backup(backup_type="manual", note=""):
     def _sync_dump():
         cmd = [
             "pg_dump",
-            "--host", host,
-            "--port", str(port),
-            "--username", user,
-            "--dbname", dbname,
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--username",
+            user,
+            "--dbname",
+            dbname,
             "--clean",
             "--if-exists",
             # --no-owner / --no-privileges make the dump portable across DB
@@ -80,13 +87,15 @@ async def create_backup(backup_type="manual", note=""):
             # would otherwise fail on every OWNER / ACL clause).
             "--no-owner",
             "--no-privileges",
-            "--file", backup_path
+            "--file",
+            backup_path,
         ]
         env = os.environ.copy()
         env["PGPASSWORD"] = password
         try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True,
-                           env=env, timeout=PG_TIMEOUT)
+            subprocess.run(
+                cmd, check=True, capture_output=True, text=True, env=env, timeout=PG_TIMEOUT
+            )
             with open(backup_path + ".meta", "w") as f:
                 f.write(f"type={backup_type}\nnote={note}\ndate={timestamp}")
             logger.info(f"Backup creato: {filename}, size: {os.path.getsize(backup_path)} bytes")
@@ -95,18 +104,14 @@ async def create_backup(backup_type="manual", note=""):
             logger.error(f"pg_dump timed out after {PG_TIMEOUT}s")
             # Clean up a possibly-partial file so list_backups won't list it.
             if os.path.exists(backup_path):
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(backup_path)
-                except OSError:
-                    pass
             raise
         except subprocess.CalledProcessError as e:
             logger.error(f"pg_dump fallito: {e.stderr}")
             if os.path.exists(backup_path):
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(backup_path)
-                except OSError:
-                    pass
             raise
 
     await asyncio.to_thread(_sync_dump)
@@ -127,6 +132,7 @@ async def create_backup(backup_type="manual", note=""):
         logger.warning(f"Backup retention pruning failed (non-fatal): {e}", exc_info=True)
 
     return filename
+
 
 async def list_backups():
     """Restituisce la lista dei backup (file .sql)."""
@@ -151,17 +157,19 @@ async def list_backups():
                         meta = dict(line.strip().split("=", 1) for line in mf if "=" in line)
                 else:
                     meta = {}
-                backups.append({
-                    "filename": f,
-                    "type": meta.get("type", "unknown"),
-                    "note": meta.get("note", ""),
-                    "created": datetime.fromtimestamp(mtime),
-                    "size": size
-                })
+                backups.append(
+                    {
+                        "filename": f,
+                        "type": meta.get("type", "unknown"),
+                        "note": meta.get("note", ""),
+                        "created": datetime.fromtimestamp(mtime),
+                        "size": size,
+                    }
+                )
                 logger.debug(f"Valid backup file: {f}, type: {meta.get('type')}")
             except Exception as e:
                 logger.error(f"Errore nel leggere il file di backup {f}: {e}")
-    backups.sort(key=lambda x: x["created"], reverse=True)
+    backups.sort(key=lambda x: x["created"], reverse=True)  # type: ignore[arg-type,return-value]
     logger.info(f"Returning {len(backups)} backups")
     return backups
 
@@ -187,10 +195,7 @@ async def prune_backups(keep_daily: int = 30):
 
     # Candidate auto backups that are NOT monthly. (list_backups parses the
     # .meta `note` field; "monthly" is set by main.py on the 1st of the month.)
-    candidates = [
-        b for b in backups
-        if b.get("type") == "auto" and b.get("note") != "monthly"
-    ]
+    candidates = [b for b in backups if b.get("type") == "auto" and b.get("note") != "monthly"]
     # newest-first already; keep the first `keep_daily`, prune the rest.
     to_prune = candidates[keep_daily:]
     if not to_prune:
@@ -213,6 +218,7 @@ async def prune_backups(keep_daily: int = 30):
         f"{pruned} file(s) removed."
     )
 
+
 async def restore_backup(filename):
     """Ripristina il database da un file di backup SQL.
 
@@ -228,7 +234,7 @@ async def restore_backup(filename):
     user, password, host, port, dbname = _parse_db_url(DATABASE_URL)
 
     def _sync_restore():
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         emergency_filename = f"pre_restore_{timestamp}_before_restore.sql"
         emergency_path = _safe_backup_path(emergency_filename)
         env = os.environ.copy()
@@ -238,16 +244,22 @@ async def restore_backup(filename):
         try:
             cmd_dump = [
                 "pg_dump",
-                "--host", host,
-                "--port", str(port),
-                "--username", user,
-                "--dbname", dbname,
+                "--host",
+                host,
+                "--port",
+                str(port),
+                "--username",
+                user,
+                "--dbname",
+                dbname,
                 "--no-owner",
                 "--no-privileges",
-                "--file", emergency_path
+                "--file",
+                emergency_path,
             ]
-            subprocess.run(cmd_dump, check=True, capture_output=True, text=True,
-                           env=env, timeout=PG_TIMEOUT)
+            subprocess.run(
+                cmd_dump, check=True, capture_output=True, text=True, env=env, timeout=PG_TIMEOUT
+            )
             logger.info(f"Backup di emergenza creato: {emergency_filename}")
         except subprocess.TimeoutExpired:
             logger.error(f"Emergency pg_dump timed out after {PG_TIMEOUT}s")
@@ -259,15 +271,21 @@ async def restore_backup(filename):
         # Restore
         cmd_restore = [
             "psql",
-            "--host", host,
-            "--port", str(port),
-            "--username", user,
-            "--dbname", dbname,
-            "--file", backup_path
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--username",
+            user,
+            "--dbname",
+            dbname,
+            "--file",
+            backup_path,
         ]
         try:
-            subprocess.run(cmd_restore, check=True, capture_output=True, text=True,
-                           env=env, timeout=PG_TIMEOUT)
+            subprocess.run(
+                cmd_restore, check=True, capture_output=True, text=True, env=env, timeout=PG_TIMEOUT
+            )
             logger.info(f"Ripristino da {filename} completato.")
             return True
         except subprocess.TimeoutExpired:

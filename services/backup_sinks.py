@@ -27,11 +27,10 @@ failure loudly. Losing the off-site copy is bad; losing the whole backup
 because the upload raised would be worse.
 """
 
+import asyncio
 import logging
 import os
-import asyncio
 from abc import ABC, abstractmethod
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +76,7 @@ class S3Sink(BackupSink):
             from botocore.exceptions import BotoCoreError, ClientError
         except ImportError as e:
             raise RuntimeError(
-                "BACKUP_SINK=s3 requires the 'boto3' package. "
-                "Install it with: pip install boto3"
+                "BACKUP_SINK=s3 requires the 'boto3' package. Install it with: pip install boto3"
             ) from e
 
         def _sync_upload():
@@ -149,7 +147,7 @@ def get_sink() -> BackupSink:
     raise ValueError(f"Unknown BACKUP_SINK: {kind!r}")
 
 
-async def upload_to_sink(local_path: str) -> Optional[str]:
+async def upload_to_sink(local_path: str) -> str | None:
     """Upload a file to the configured sink, logging failures but not raising.
 
     Returns the remote URI on success, or None if the sink is 'local' or the

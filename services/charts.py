@@ -18,44 +18,47 @@ in an executor to avoid blocking the event loop:
 
 import io
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Set the Agg backend BEFORE importing pyplot — this must happen at module
 # load time so matplotlib never tries to open a display window.
-import matplotlib
+import matplotlib  # noqa: E402 — must set Agg before importing pyplot
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.dates import DateFormatter
+import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.dates import DateFormatter  # noqa: E402
 
 # CivMC-ish palette (green = active/growth, red = inactive/decline, blue =
 # neutral totals). Avoids indigo/blue per project styling rules.
-COLOR_TOTAL = "#5865F2"      # discord blurple — for total population
-COLOR_ACTIVE = "#3BAD4C"     # CivMC green — for active citizens
-COLOR_INACTIVE = "#ED4245"   # discord red — for inactive
+COLOR_TOTAL = "#5865F2"  # discord blurple — for total population
+COLOR_ACTIVE = "#3BAD4C"  # CivMC green — for active citizens
+COLOR_INACTIVE = "#ED4245"  # discord red — for inactive
 COLOR_GRID = "#3a3a3a"
 COLOR_TEXT = "#dcddde"
-COLOR_BG = "#36393f"         # discord dark-mode background
+COLOR_BG = "#36393f"  # discord dark-mode background
 
 
 def _apply_dark_style():
     """Apply a Discord-dark-friendly style so charts look good in embeds."""
-    plt.rcParams.update({
-        "figure.facecolor": COLOR_BG,
-        "axes.facecolor": COLOR_BG,
-        "axes.edgecolor": COLOR_GRID,
-        "axes.labelcolor": COLOR_TEXT,
-        "xtick.color": COLOR_TEXT,
-        "ytick.color": COLOR_TEXT,
-        "text.color": COLOR_TEXT,
-        "axes.grid": True,
-        "grid.color": COLOR_GRID,
-        "grid.alpha": 0.3,
-        "font.size": 10,
-        "axes.titlesize": 13,
-        "axes.titleweight": "bold",
-    })
+    plt.rcParams.update(
+        {
+            "figure.facecolor": COLOR_BG,
+            "axes.facecolor": COLOR_BG,
+            "axes.edgecolor": COLOR_GRID,
+            "axes.labelcolor": COLOR_TEXT,
+            "xtick.color": COLOR_TEXT,
+            "ytick.color": COLOR_TEXT,
+            "text.color": COLOR_TEXT,
+            "axes.grid": True,
+            "grid.color": COLOR_GRID,
+            "grid.alpha": 0.3,
+            "font.size": 10,
+            "axes.titlesize": 13,
+            "axes.titleweight": "bold",
+        }
+    )
 
 
 def _close_all(figs):
@@ -65,9 +68,9 @@ def _close_all(figs):
 
 
 def render_population_trends(
-    snapshots: List[Dict[str, Any]],
-    top_settlements: Optional[List[Dict[str, Any]]] = None,
-) -> Optional[bytes]:
+    snapshots: list[dict[str, Any]],
+    top_settlements: list[dict[str, Any]] | None = None,
+) -> bytes | None:
     """Render a 2-panel population-trends chart from monthly snapshots.
 
     Args:
@@ -88,7 +91,7 @@ def render_population_trends(
 
     # --- Panel 1+2: National total + active vs inactive ---
     # Aggregate all duchies per snapshot_date into national totals.
-    by_date: Dict[Any, Dict[str, int]] = {}
+    by_date: dict[Any, dict[str, int]] = {}
     for s in snapshots:
         d = s["snapshot_date"]
         if d not in by_date:
@@ -99,7 +102,7 @@ def render_population_trends(
     dates = sorted(by_date.keys())
     totals = [by_date[d]["total"] for d in dates]
     actives = [by_date[d]["active"] for d in dates]
-    inactives = [t - a for t, a in zip(totals, actives)]
+    inactives = [t - a for t, a in zip(totals, actives, strict=True)]
 
     has_settlements = bool(top_settlements)
     if has_settlements:
@@ -117,10 +120,14 @@ def render_population_trends(
         ax1.set_xlim(dates[0], dates[-1])
 
     # Panel 2: Active vs Inactive (stacked area)
-    ax2.stackplot(dates, actives, inactives,
-                  labels=["Active", "Inactive"],
-                  colors=[COLOR_ACTIVE, COLOR_INACTIVE],
-                  alpha=0.8)
+    ax2.stackplot(
+        dates,
+        actives,
+        inactives,
+        labels=["Active", "Inactive"],
+        colors=[COLOR_ACTIVE, COLOR_INACTIVE],
+        alpha=0.8,
+    )
     ax2.plot(dates, actives, color=COLOR_ACTIVE, linewidth=2, marker="o", markersize=5)
     ax2.set_title("Active vs Inactive Population")
     ax2.set_ylabel("Citizens")
@@ -132,24 +139,41 @@ def render_population_trends(
 
     # Panel 3 (optional): Top settlements growth
     if has_settlements:
+        assert top_settlements is not None  # has_settlements implies non-None
         # Group by district, collect (date, total) series.
-        settlement_series: Dict[str, List[tuple]] = {}
+        settlement_series: dict[str, list[tuple]] = {}
         for s in top_settlements:
             d = s["district"]
             settlement_series.setdefault(d, []).append((s["snapshot_date"], s["total"]))
 
         # Sort each series by date and plot.
-        colors_cycle = ["#3BAD4C", "#FAA61A", "#E91E63", "#9B59B6",
-                        "#1ABC9C", "#E67E22", "#3498DB", "#F1C40F"]
-        for idx, (district, series) in enumerate(sorted(
-            settlement_series.items(), key=lambda x: x[1][-1][1] if x[1] else 0, reverse=True
-        )):
+        colors_cycle = [
+            "#3BAD4C",
+            "#FAA61A",
+            "#E91E63",
+            "#9B59B6",
+            "#1ABC9C",
+            "#E67E22",
+            "#3498DB",
+            "#F1C40F",
+        ]
+        for idx, (district, series) in enumerate(
+            sorted(
+                settlement_series.items(), key=lambda x: x[1][-1][1] if x[1] else 0, reverse=True
+            )
+        ):
             series.sort(key=lambda t: t[0])
             sd = [t[0] for t in series]
             sv = [t[1] for t in series]
-            ax3.plot(sd, sv, marker="o", linewidth=2, markersize=5,
-                     label=district[:20],
-                     color=colors_cycle[idx % len(colors_cycle)])
+            ax3.plot(
+                sd,
+                sv,
+                marker="o",
+                linewidth=2,
+                markersize=5,
+                label=district[:20],
+                color=colors_cycle[idx % len(colors_cycle)],
+            )
 
         ax3.set_title("Top Settlements — Population Growth")
         ax3.set_ylabel("Citizens")

@@ -9,12 +9,13 @@ The monitor reuses the same mcsrvstat.us endpoint as /server status, so no
 extra auth or dependencies are needed.
 """
 
+import logging
+from datetime import UTC, datetime
+
 import discord
 from discord.ext import tasks
+
 from core.config import Config
-import logging
-import aiohttp
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ class UptimeMonitor:
         self.fail_count = 0
         self.outage_start = None
         self.alerted_outage = False
+        # Phase 1.5: the duration of the most recent completed outage, in
+        # seconds. Populated on recovery, read by /metrics. 0 until the first
+        # recovery so the gauge has a sensible default.
+        self.last_outage_duration_seconds = 0.0
         logger.info("🖥️ UptimeMonitor initialized")
 
     async def _fetch_online(self) -> bool | None:
@@ -93,7 +98,9 @@ class UptimeMonitor:
                 # Transition: offline -> online (recovery).
                 duration_str = ""
                 if self.outage_start:
-                    delta = datetime.now(timezone.utc) - self.outage_start
+                    delta = datetime.now(UTC) - self.outage_start
+                    # Record the completed outage duration for /metrics.
+                    self.last_outage_duration_seconds = delta.total_seconds()
                     mins = int(delta.total_seconds() // 60)
                     if mins < 60:
                         duration_str = f" (was down ~{mins}m)"
@@ -101,17 +108,15 @@ class UptimeMonitor:
                         hours = mins // 60
                         rem_mins = mins % 60
                         duration_str = f" (was down ~{hours}h {rem_mins}m)"
+                else:
+                    self.last_outage_duration_seconds = 0.0
 
                 embed = discord.Embed(
                     title="✅ CivMC Server Recovered",
                     description=f"The server is back online{duration_str}.",
-                    color=0x3BAD4C
+                    color=0x3BAD4C,
                 )
-                embed.add_field(
-                    name="Address",
-                    value=f"`{Config.SERVER_ADDRESS}`",
-                    inline=False
-                )
+                embed.add_field(name="Address", value=f"`{Config.SERVER_ADDRESS}`", inline=False)
                 embed.set_footer(text="Use /server status for live details")
                 await self._send_alert(embed, content="✅ **CivMC is back online**")
                 logger.info(f"CivMC recovered after outage{duration_str}.")
@@ -132,7 +137,7 @@ class UptimeMonitor:
 
             # We've confirmed the outage (enough consecutive failures).
             if not self.alerted_outage:
-                self.outage_start = self.outage_start or datetime.now(timezone.utc)
+                self.outage_start = self.outage_start or datetime.now(UTC)
                 self.last_online = False
                 self.alerted_outage = True
 
@@ -143,12 +148,12 @@ class UptimeMonitor:
                         f"This could be a scheduled restart, a crash, or maintenance.\n"
                         f"You will be notified when it comes back up."
                     ),
-                    color=0xED4245
+                    color=0xED4245,
                 )
                 embed.add_field(
                     name="Detected at",
                     value=self.outage_start.strftime("%H:%M:%S UTC"),
-                    inline=True
+                    inline=True,
                 )
                 embed.set_footer(text="Automatic recovery alert will follow")
                 await self._send_alert(embed, content="@here ⚠️ **CivMC appears to be down**")

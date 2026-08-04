@@ -1,14 +1,13 @@
-import discord
-from core.config import Config
-from core import database as db
-from api import civinfo_api
 import logging
-from typing import Optional
+
+import discord
+
+from core.config import Config
 
 logger = logging.getLogger(__name__)
 
 
-def _find_role_by_name(guild: discord.Guild, name: str) -> Optional[discord.Role]:
+def _find_role_by_name(guild: discord.Guild, name: str) -> discord.Role | None:
     """Case-insensitive role lookup by name.
 
     Settlement names are CITEXT (case-insensitive) in the DB, so the Discord
@@ -29,7 +28,9 @@ async def assign_citizen_roles(member: discord.Member, settlement: str):
         roles_to_add = []
 
         guest_role = guild.get_role(Config.GUEST_ROLE_ID)
-        citizen_roles = [guild.get_role(rid) for rid in Config.CITIZEN_ROLE_IDS if guild.get_role(rid)]
+        citizen_roles: list[discord.Role] = [
+            r for rid in Config.CITIZEN_ROLE_IDS if (r := guild.get_role(rid)) is not None
+        ]
         settler_role = guild.get_role(Config.SETTLER_ROLE_ID)
         settlement_role = _find_role_by_name(guild, settlement)
 
@@ -46,19 +47,25 @@ async def assign_citizen_roles(member: discord.Member, settlement: str):
             await member.add_roles(*roles_to_add)
         logger.info(f"Assigned {len(roles_to_add)} roles to {member}")
     except discord.Forbidden:
-        logger.error(f"Bot lacks permission to assign roles to {member.mention} in guild {guild.name}", exc_info=True)
+        logger.error(
+            f"Bot lacks permission to assign roles to {member.mention} in guild {guild.name}",
+            exc_info=True,
+        )
         raise
     except Exception as e:
         logger.error(f"Failed to assign citizen roles to {member}: {e}", exc_info=True)
         raise
 
-async def remove_all_citizen_roles(member: discord.Member, settlement: Optional[str] = None):
+
+async def remove_all_citizen_roles(member: discord.Member, settlement: str | None = None):
     """Remove all citizen roles and reassign guest role with error handling."""
     try:
         guild = member.guild
         roles_to_remove = []
 
-        citizen_roles = [guild.get_role(rid) for rid in Config.CITIZEN_ROLE_IDS if guild.get_role(rid)]
+        citizen_roles: list[discord.Role] = [
+            r for rid in Config.CITIZEN_ROLE_IDS if (r := guild.get_role(rid)) is not None
+        ]
         settler_role = guild.get_role(Config.SETTLER_ROLE_ID)
 
         if citizen_roles:
@@ -79,11 +86,15 @@ async def remove_all_citizen_roles(member: discord.Member, settlement: Optional[
 
         logger.info(f"Removed {len(roles_to_remove)} roles from {member}")
     except discord.Forbidden:
-        logger.error(f"Bot lacks permission to remove roles from {member.mention} in guild {guild.name}", exc_info=True)
+        logger.error(
+            f"Bot lacks permission to remove roles from {member.mention} in guild {guild.name}",
+            exc_info=True,
+        )
         raise
     except Exception as e:
         logger.error(f"Failed to remove citizen roles from {member}: {e}", exc_info=True)
         raise
+
 
 async def update_settlement_role(member: discord.Member, old_settlement: str, new_settlement: str):
     """Update settlement role for a member with error handling."""
@@ -101,16 +112,27 @@ async def update_settlement_role(member: discord.Member, old_settlement: str, ne
         if guest_role and guest_role in member.roles:
             await member.remove_roles(guest_role)
 
-        logger.info(f"Updated settlement role for {member} from {old_settlement} to {new_settlement}")
+        logger.info(
+            f"Updated settlement role for {member} from {old_settlement} to {new_settlement}"
+        )
     except discord.Forbidden:
-        logger.error(f"Bot lacks permission to update roles for {member.mention} in guild {guild.name}", exc_info=True)
+        logger.error(
+            f"Bot lacks permission to update roles for {member.mention} in guild {guild.name}",
+            exc_info=True,
+        )
         raise
     except Exception as e:
         logger.error(f"Failed to update settlement role for {member}: {e}", exc_info=True)
         raise
 
-async def handle_user_change(guild: discord.Guild, old_discord_id: str, new_discord_member: discord.Member,
-                             old_settlement: str, new_settlement: str):
+
+async def handle_user_change(
+    guild: discord.Guild,
+    old_discord_id: str,
+    new_discord_member: discord.Member,
+    old_settlement: str,
+    new_settlement: str,
+):
     """Handle Discord user change for a citizen, moving roles appropriately."""
     try:
         # Remove roles from old user
@@ -124,8 +146,10 @@ async def handle_user_change(guild: discord.Guild, old_discord_id: str, new_disc
         logger.error(f"Failed to handle user change: {e}", exc_info=True)
         raise
 
-async def handle_settlement_change(guild: discord.Guild, discord_id: str,
-                                   old_settlement: str, new_settlement: str):
+
+async def handle_settlement_change(
+    guild: discord.Guild, discord_id: str, old_settlement: str, new_settlement: str
+):
     """Handle settlement change for a citizen, updating roles accordingly."""
     try:
         member = guild.get_member(int(discord_id))

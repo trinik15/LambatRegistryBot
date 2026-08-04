@@ -1,8 +1,7 @@
-import aiohttp
-import asyncio
-from datetime import datetime, timezone
 import logging
-from typing import Optional, Tuple
+from datetime import UTC, datetime
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -28,17 +27,25 @@ class CivInfoCache:
         self.cache = {}
         self.ttl = ttl_seconds
 
-    def get(self, ign: str) -> Optional[Tuple[str, str, Optional[datetime], str]]:
+    def get(self, ign: str) -> tuple[str, str, datetime | None, str] | None:
         """Return (status, emoji, last_login, status_text) if cached and fresh."""
         if ign in self.cache:
             data, timestamp, ttl = self.cache[ign]
-            if datetime.now(timezone.utc).timestamp() - timestamp < ttl:
+            if datetime.now(UTC).timestamp() - timestamp < ttl:
+                # Phase 1.5: count cache hits so /metrics can show the hit rate
+                # (a high hit rate means we're saving CivInfo API calls).
+                try:
+                    from core.metrics import record_cache_hit
+
+                    record_cache_hit()
+                except Exception:  # noqa: BLE001 — metrics must never break lookups
+                    pass
                 return data
             else:
                 del self.cache[ign]
         return None
 
-    def set(self, ign: str, data: Tuple[str, str, Optional[datetime], str], ttl: Optional[int] = None):
+    def set(self, ign: str, data: tuple[str, str, datetime | None, str], ttl: int | None = None):
         """Store (status, emoji, last_login, status_text) with current timestamp.
 
         ``ttl`` overrides the default TTL — used to keep error / not_found
@@ -46,7 +53,7 @@ class CivInfoCache:
         doesn't blacklist a player for the full success TTL.
         """
         actual_ttl = ttl if ttl is not None else self.ttl
-        self.cache[ign] = (data, datetime.now(timezone.utc).timestamp(), actual_ttl)
+        self.cache[ign] = (data, datetime.now(UTC).timestamp(), actual_ttl)
 
     def clear(self):
         """Drop every cached entry (e.g. after a database restore)."""
@@ -55,6 +62,7 @@ class CivInfoCache:
     def invalidate(self, ign: str):
         """Drop a single cached entry so the next lookup hits the API fresh."""
         self.cache.pop(ign, None)
+
 
 cache = CivInfoCache()
 
@@ -76,7 +84,7 @@ def is_auth_broken() -> bool:
     global _auth_broken_until
     if not _auth_broken_until:
         return False
-    if datetime.now(timezone.utc).timestamp() > _auth_broken_until:
+    if datetime.now(UTC).timestamp() > _auth_broken_until:
         # TTL expired — allow a retry; the warning may fire again if still broken.
         _auth_broken_until = 0.0
         return False
@@ -86,14 +94,15 @@ def is_auth_broken() -> bool:
 def _mark_auth_broken(reason: str):
     """Record that the API rejected our auth, logging loudly once per window."""
     global _auth_broken_until, _auth_warned
-    _auth_broken_until = datetime.now(timezone.utc).timestamp() + AUTH_BROKEN_TTL
+    _auth_broken_until = datetime.now(UTC).timestamp() + AUTH_BROKEN_TTL
     if not _auth_warned:
         logger.error(
             "CivInfo API auth failed: %s. Activity data will be unavailable "
             "for up to %ds. Set CIVINFO_API_KEY (contact minecraft.gjum@gmail.com "
             "for a key). Reports will show 'Activity data unavailable' instead "
             "of fake counts.",
-            reason, AUTH_BROKEN_TTL
+            reason,
+            AUTH_BROKEN_TTL,
         )
         _auth_warned = True
 
@@ -111,6 +120,7 @@ def _auth_headers():
     """Build request headers, including the Bearer token if a key is set."""
     # Imported here to avoid a circular import at module load time.
     from core.config import Config
+
     headers = {"Accept": "application/json"}
     if Config.CIVINFO_API_KEY:
         headers["Authorization"] = f"Bearer {Config.CIVINFO_API_KEY}"
@@ -126,7 +136,9 @@ def _ttl_for(status: str) -> int:
     return CACHE_TTL_ERROR
 
 
-async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Tuple[str, str, Optional[datetime], str]:
+async def get_player_activity(
+    ign: str, session: aiohttp.ClientSession
+) -> tuple[str, str, datetime | None, str]:
     """
     Return a tuple (status, emoji, last_login, status_text)
     status is one of: "ok", "not_found", "error"
@@ -142,7 +154,12 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Tuple
     # honest "unavailable" result immediately. The cache TTL on these is
     # short so we retry periodically (via is_auth_broken's own TTL).
     if is_auth_broken():
-        result = ("error", "⚪", None, "API Auth Required")
+        result: tuple[str, str, datetime | None, str] = (
+            "error",
+            "⚪",
+            None,
+            "API Auth Required",
+        )
         cache.set(ign, result, ttl=_ttl_for("error"))
         return result
 
@@ -190,11 +207,14 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Tuple
                 return result
 
             last_ts = max(valid_timestamps) / 1000.0
-            last_date = datetime.fromtimestamp(last_ts, tz=timezone.utc)
-            days_ago = (datetime.now(timezone.utc) - last_date).days
+            last_date = datetime.fromtimestamp(last_ts, tz=UTC)
+            days_ago = (datetime.now(UTC) - last_date).days
 
             if days_ago < 30:
-                emoji, text = "🟢", f"Active ({days_ago}d ago)" if days_ago > 0 else "Active (today)"
+                emoji, text = (
+                    "🟢",
+                    f"Active ({days_ago}d ago)" if days_ago > 0 else "Active (today)",
+                )
             elif days_ago < 60:
                 emoji, text = "🟠", f"Semi-Inactive ({days_ago}d ago)"
             else:
@@ -204,7 +224,7 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Tuple
             cache.set(ign, result, ttl=_ttl_for("ok"))
             return result
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(f"Timeout fetching CivInfo for {ign}")
         result = ("error", "⚪", None, "Timeout")
         cache.set(ign, result, ttl=_ttl_for("error"))

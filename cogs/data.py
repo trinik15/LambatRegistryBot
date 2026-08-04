@@ -1,13 +1,13 @@
 # cogs/data.py
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from api import civinfo_api
 from core.config import Config
 from services import backup
-from api import civinfo_api
-import logging
-import os
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -67,19 +67,22 @@ class DataCog(commands.Cog):
         backups = await backup.list_backups()
         filtered = [b for b in backups if current.lower() in b["filename"].lower()]
         return [
-            app_commands.Choice(name=f"{b['filename']} ({b['created'].strftime('%Y-%m-%d')})", value=b["filename"])
+            app_commands.Choice(
+                name=f"{b['filename']} ({b['created'].strftime('%Y-%m-%d')})", value=b["filename"]
+            )
             for b in filtered[:25]
         ]
 
     @data_group.command(name="backup", description="Create a manual database backup")
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_backup"))
-    async def data_backup(self, interaction: discord.Interaction, note: Optional[str] = None):
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_backup")
+    )
+    async def data_backup(self, interaction: discord.Interaction, note: str | None = None):
         """Create a manual backup."""
         # Check full access permission
         if not self.has_full_access(interaction):
             return await interaction.response.send_message(
-                "❌ You need the Council role to use this command.",
-                ephemeral=True
+                "❌ You need the Council role to use this command.", ephemeral=True
             )
 
         await interaction.response.defer(ephemeral=True)
@@ -87,27 +90,25 @@ class DataCog(commands.Cog):
         try:
             filename = await backup.create_backup("manual", note or "manual_backup")
             embed = discord.Embed(
-                title="✅ Backup Created",
-                description=f"Backup file: `{filename}`",
-                color=0x43B581
+                title="✅ Backup Created", description=f"Backup file: `{filename}`", color=0x43B581
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"Backup creation failed: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ Failed to create backup. Check logs for details.",
-                ephemeral=True
+                "❌ Failed to create backup. Check logs for details.", ephemeral=True
             )
 
     @data_group.command(name="list_backups", description="List all available backups")
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "data_list_backups"))
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "data_list_backups")
+    )
     async def data_list_backups(self, interaction: discord.Interaction):
         """List all available backups."""
         # Check full access permission
         if not self.has_full_access(interaction):
             return await interaction.response.send_message(
-                "❌ You need the Council role to use this command.",
-                ephemeral=True
+                "❌ You need the Council role to use this command.", ephemeral=True
             )
 
         await interaction.response.defer(ephemeral=True)
@@ -118,15 +119,14 @@ class DataCog(commands.Cog):
             await interaction.followup.send("No backups found.", ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title="📦 Available Backups",
-            color=0x7289DA
-        )
+        embed = discord.Embed(title="📦 Available Backups", color=0x7289DA)
 
         backup_text = []
         for b in backups[:20]:
             backup_text.append(f"• `{b['filename']}`")
-            backup_text.append(f"  {b['created'].strftime('%Y-%m-%d %H:%M')} - {b['size'] // 1024}KB")
+            backup_text.append(
+                f"  {b['created'].strftime('%Y-%m-%d %H:%M')} - {b['size'] // 1024}KB"
+            )
             if b.get("note"):
                 backup_text.append(f"  Note: {b['note']}")
 
@@ -139,15 +139,16 @@ class DataCog(commands.Cog):
 
     @data_group.command(name="restore", description="Restore database from backup")
     @app_commands.autocomplete(filename=backup_autocomplete)
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_restore"))
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "data_restore")
+    )
     async def data_restore(self, interaction: discord.Interaction, filename: str):
         """Restore database from a backup file."""
         # Check full access permission (owner or role-based)
         # This is a critical operation - only users with full access can perform it
         if not self.has_full_access(interaction):
             return await interaction.response.send_message(
-                "❌ You need the Council role to use this command.",
-                ephemeral=True
+                "❌ You need the Council role to use this command.", ephemeral=True
             )
 
         await interaction.response.defer(ephemeral=True)
@@ -157,10 +158,7 @@ class DataCog(commands.Cog):
         backup_exists = any(b["filename"] == filename for b in backups)
 
         if not backup_exists:
-            await interaction.followup.send(
-                f"❌ Backup `{filename}` not found.",
-                ephemeral=True
-            )
+            await interaction.followup.send(f"❌ Backup `{filename}` not found.", ephemeral=True)
             return
 
         # Confirmation view - checks full access for both confirm and cancel
@@ -175,13 +173,11 @@ class DataCog(commands.Cog):
                 # Verify the user still has full access
                 if not self.cog.has_full_access(interaction):
                     return await interaction.response.send_message(
-                        "❌ You no longer have permission to restore backups.",
-                        ephemeral=True
+                        "❌ You no longer have permission to restore backups.", ephemeral=True
                     )
                 if interaction.user.id != self.requester_id:
                     return await interaction.response.send_message(
-                        "You did not initiate this restore.",
-                        ephemeral=True
+                        "You did not initiate this restore.", ephemeral=True
                     )
 
                 await interaction.response.defer(ephemeral=True)
@@ -199,7 +195,7 @@ class DataCog(commands.Cog):
                             f"Successfully restored from `{filename}`.\n"
                             f"All in-memory caches have been cleared."
                         ),
-                        color=0x43B581
+                        color=0x43B581,
                     )
                     await interaction.followup.send(embed=embed, ephemeral=True)
                 except Exception as e:
@@ -207,7 +203,7 @@ class DataCog(commands.Cog):
                     await interaction.followup.send(
                         "❌ Restore failed. An emergency backup was attempted before "
                         "the restore — check the backups folder. See bot logs for details.",
-                        ephemeral=True
+                        ephemeral=True,
                     )
                 self.stop()
 
@@ -216,13 +212,11 @@ class DataCog(commands.Cog):
                 # Verify the user still has full access
                 if not self.cog.has_full_access(interaction):
                     return await interaction.response.send_message(
-                        "❌ You no longer have permission to restore backups.",
-                        ephemeral=True
+                        "❌ You no longer have permission to restore backups.", ephemeral=True
                     )
                 if interaction.user.id != self.requester_id:
                     return await interaction.response.send_message(
-                        "You did not initiate this restore.",
-                        ephemeral=True
+                        "You did not initiate this restore.", ephemeral=True
                     )
                 await interaction.response.send_message("Restore cancelled.", ephemeral=True)
                 self.stop()
@@ -230,7 +224,7 @@ class DataCog(commands.Cog):
         embed = discord.Embed(
             title="⚠️ Confirm Database Restore",
             description=f"Are you sure you want to restore from `{filename}`?\n\nThis will overwrite the current database and cannot be undone.",
-            color=0xff9900
+            color=0xFF9900,
         )
         view = RestoreConfirm(self, interaction.user.id)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)

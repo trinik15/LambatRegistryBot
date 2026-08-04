@@ -1,12 +1,14 @@
+import asyncio
+import logging
+from datetime import UTC, datetime, timedelta
+
 import discord
 from discord.ext import tasks
-from core import database as db
+
 from api import civinfo_api
+from core import database as db
 from core.config import Config
 from core.constants import Emojis
-from datetime import datetime, timedelta, timezone
-import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,7 @@ async def _fetch_activities(igns, session):
             return ign, await civinfo_api.get_player_activity(ign, session)
 
     results = await asyncio.gather(*(_one(ign) for ign in igns), return_exceptions=False)
-    return {ign: data for ign, data in results}
+    return dict(results)
 
 
 # Mappa distretto -> provincia (duchy)
@@ -52,6 +54,7 @@ SETTLEMENT_TO_DUCHY = {
     "Pampang": "San Canela",
 }
 
+
 class ActivityMonitor:
     def __init__(self, bot):
         self.bot = bot
@@ -64,8 +67,10 @@ class ActivityMonitor:
             await self.bot.wait_until_ready()
             logger.info("Starting daily activity check")
 
-            today = datetime.now(timezone.utc)
-            citizens = await db.execute_query("SELECT ign, join_date, settlement FROM citizens", fetch_all=True)
+            today = datetime.now(UTC)
+            citizens = await db.execute_query(
+                "SELECT ign, join_date, settlement FROM citizens", fetch_all=True
+            )
             if not citizens:
                 logger.info("No citizens to check")
                 return
@@ -77,7 +82,7 @@ class ActivityMonitor:
             await _fetch_activities([row["ign"] for row in citizens], session)
 
             # 2. Se è il primo del mese → genera report mensile
-            if today.day == 1:   # solo il primo giorno del mese
+            if today.day == 1:  # solo il primo giorno del mese
                 logger.info("🔵 Generating monthly report")
                 await self.generate_monthly_report()
 
@@ -92,7 +97,7 @@ class ActivityMonitor:
             await self.bot.wait_until_ready()
             # Run at 02:00 UTC (consistent across deployments). See
             # before_daily_backup in main.py for the same pattern.
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             target = now.replace(hour=2, minute=0, second=0, microsecond=0)
             if now > target:
                 target += timedelta(days=1)
@@ -107,32 +112,29 @@ class ActivityMonitor:
         """Generate and send the detailed monthly census report."""
         logger.info("Generating monthly report...")
 
-        today = datetime.now(timezone.utc)
+        today = datetime.now(UTC)
         # Data dell'ultimo giorno del mese precedente (es. se oggi è 1 marzo, last_month = 28/29 febbraio)
         last_month = today.replace(day=1) - timedelta(days=1)
         last_month_date = last_month.date()
         month_name = last_month.strftime("%B %Y")  # Nome del mese passato (es. "February 2026")
 
         citizens = await db.execute_query(
-            "SELECT ign, settlement, join_date FROM citizens",
-            fetch_all=True
+            "SELECT ign, settlement, join_date FROM citizens", fetch_all=True
         )
         if not citizens:
             logger.warning("No citizens to generate monthly report")
             return
 
         # Raccogli dati correnti per provincia e distretto
-        province_totals = {}
-        province_active = {}
-        district_totals = {}
-        district_active = {}
+        province_totals: dict[str, int] = {}
+        province_active: dict[str, int] = {}
+        district_totals: dict[str, int] = {}
+        district_active: dict[str, int] = {}
 
         # Fetch every citizen's activity in one concurrent batch instead of
         # one await per citizen (the old loop could exceed Discord's 15-minute
         # interaction token window for large registries).
-        activities = await _fetch_activities(
-            [c["ign"] for c in citizens], self.bot.http_session
-        )
+        activities = await _fetch_activities([c["ign"] for c in citizens], self.bot.http_session)
 
         # If CivInfo auth is broken, the monthly report's "active population"
         # numbers would all be zero and mislead leadership. We annotate the
@@ -141,7 +143,7 @@ class ActivityMonitor:
 
         for c in citizens:
             _, emoji, _, _ = activities.get(c["ign"], ("error", "⚪", None, "Error"))
-            is_active = (emoji == "🟢")
+            is_active = emoji == "🟢"
 
             district = c["settlement"]
             duchy = SETTLEMENT_TO_DUCHY.get(district, "Unknown")
@@ -158,7 +160,7 @@ class ActivityMonitor:
         old_snapshots = await db.execute_query(
             "SELECT duchy, district, total, active FROM monthly_snapshots WHERE snapshot_date = $1",
             (last_month_date,),
-            fetch_all=True
+            fetch_all=True,
         )
         old_province = {}
         old_district = {}
@@ -181,12 +183,18 @@ class ActivityMonitor:
 
         total_citizens = len(citizens)
         active_citizens = sum(province_active.values())
-        lines.append(f"**Total Registered population (does not account for actual activity):** {total_citizens}\n")
+        lines.append(
+            f"**Total Registered population (does not account for actual activity):** {total_citizens}\n"
+        )
         if auth_broken:
-            lines.append(f"**Active population**: ⚠️ **Unavailable** — CivInfo API auth required. The numbers below are unreliable.\n")
+            lines.append(
+                "**Active population**: ⚠️ **Unavailable** — CivInfo API auth required. The numbers below are unreliable.\n"
+            )
         else:
-            pct = round(active_citizens/total_citizens*100, 2) if total_citizens else 0
-            lines.append(f"**Active population (all players who have logged on within the month)**: {active_citizens} ({pct}% of reg. citizens)\n")
+            pct = round(active_citizens / total_citizens * 100, 2) if total_citizens else 0
+            lines.append(
+                f"**Active population (all players who have logged on within the month)**: {active_citizens} ({pct}% of reg. citizens)\n"
+            )
 
         if old_snapshots:
             old_total = sum(s["total"] for s in old_snapshots if s["district"] is None)
@@ -194,9 +202,13 @@ class ActivityMonitor:
             pct_total, arrow_total = calc_change(old_total, total_citizens)
             pct_active, arrow_active = calc_change(old_active, active_citizens)
             if pct_total is not None:
-                lines.append(f"Registered population change :    {pct_total}% from last month {arrow_total}")
+                lines.append(
+                    f"Registered population change :    {pct_total}% from last month {arrow_total}"
+                )
             if pct_active is not None:
-                lines.append(f"Active population change:    {pct_active}% from last month {arrow_active}\n")
+                lines.append(
+                    f"Active population change:    {pct_active}% from last month {arrow_active}\n"
+                )
         else:
             lines.append("")
 
@@ -217,13 +229,15 @@ class ActivityMonitor:
                     continue
             if join_date >= one_month_ago:
                 new_citizens += 1
-        lines.append(f"Gain: +{new_citizens} new citizens (excludes removed/revoked recruits and returnees)\n")
+        lines.append(
+            f"Gain: +{new_citizens} new citizens (excludes removed/revoked recruits and returnees)\n"
+        )
 
         # POPULATION PER PROVINCE/TERRITORY
         lines.append(f"**{Emojis.LAMBAT} POPULATION PER PROVINCE/TERRITORY, RANKED**\n")
         for duchy, total in sorted(province_totals.items(), key=lambda x: x[1], reverse=True):
             emoji = Emojis.PROVINCE.get(duchy, "")
-            old = old_province.get(duchy, (0,0))[0]
+            old = old_province.get(duchy, (0, 0))[0]
             pct, arrow = calc_change(old, total)
             if pct is None:
                 change_str = "(new)"
@@ -236,7 +250,7 @@ class ActivityMonitor:
         lines.append(f"{Emojis.LAMBAT_CHAD} **ACTIVE POPULATION PER PROVINCE/TERRITORY**\n")
         for duchy, active in sorted(province_active.items(), key=lambda x: x[1], reverse=True):
             emoji = Emojis.PROVINCE.get(duchy, "")
-            old_active_val = old_province.get(duchy, (0,0))[1]
+            old_active_val = old_province.get(duchy, (0, 0))[1]
             pct, arrow = calc_change(old_active_val, active)
             if pct is None:
                 change_str = "(new)"
@@ -249,7 +263,7 @@ class ActivityMonitor:
         lines.append("**🏙️ POPULATION PER DISTRICT**\n")
         for district, total in sorted(district_totals.items(), key=lambda x: x[1], reverse=True):
             emoji = Emojis.DISTRICT.get(district, "")
-            old = old_district.get(district, (0,0))[0]
+            old = old_district.get(district, (0, 0))[0]
             pct, arrow = calc_change(old, total)
             if pct is None:
                 change_str = "(new)"
@@ -262,7 +276,7 @@ class ActivityMonitor:
         lines.append(f"{Emojis.LAMBATAN_SALUDO} **ACTIVE POPULATION PER DISTRICT**\n")
         for district, active in sorted(district_active.items(), key=lambda x: x[1], reverse=True):
             emoji = Emojis.DISTRICT.get(district, "")
-            old_active_val = old_district.get(district, (0,0))[1]
+            old_active_val = old_district.get(district, (0, 0))[1]
             pct, arrow = calc_change(old_active_val, active)
             if pct is None:
                 change_str = "(new)"
@@ -283,9 +297,13 @@ class ActivityMonitor:
                 try:
                     channel = await self.bot.fetch_channel(Config.MONTHLY_REPORT_CHANNEL_ID)
                 except discord.NotFound:
-                    logger.error(f"Monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID} not found.")
+                    logger.error(
+                        f"Monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID} not found."
+                    )
                 except discord.Forbidden:
-                    logger.error(f"Bot lacks permission to view monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID}.")
+                    logger.error(
+                        f"Bot lacks permission to view monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID}."
+                    )
                 except Exception as e:
                     logger.error(f"Could not fetch monthly report channel: {e}", exc_info=True)
         else:
@@ -297,8 +315,8 @@ class ActivityMonitor:
                     await channel.send(full_message)
                 else:
                     # Split without breaking lines (stay under Discord's 2000-char limit).
-                    parts = []
-                    current = []
+                    parts: list[str] = []
+                    current: list[str] = []
                     current_len = 0
                     for line in lines:
                         line_len = len(line) + 1  # +1 for the newline
@@ -315,7 +333,9 @@ class ActivityMonitor:
                         await channel.send(part)
                 logger.info("Monthly report sent")
             except discord.Forbidden:
-                logger.error(f"Bot lacks permission to send in monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID}.")
+                logger.error(
+                    f"Bot lacks permission to send in monthly report channel {Config.MONTHLY_REPORT_CHANNEL_ID}."
+                )
             except discord.HTTPException as e:
                 logger.error(f"Failed to send monthly report to Discord: {e}", exc_info=True)
         else:
@@ -325,21 +345,25 @@ class ActivityMonitor:
         # a failure midway can never leave the snapshots table half-populated
         # (which would corrupt next month's "change since last month" math).
         snapshot_date = today.date()
-        snapshot_rows = []
+        # district is None for duchy-level (province) rows, a str for district rows.
+        snapshot_rows: list[tuple] = []
         for duchy, total in province_totals.items():
             snapshot_rows.append((snapshot_date, duchy, None, total, province_active.get(duchy, 0)))
         for district, total in district_totals.items():
             duchy = SETTLEMENT_TO_DUCHY.get(district, "Unknown")
-            snapshot_rows.append((snapshot_date, duchy, district, total, district_active.get(district, 0)))
+            snapshot_rows.append(
+                (snapshot_date, duchy, district, total, district_active.get(district, 0))
+            )
 
         pool = await db.get_pool()
-        async with pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute("DELETE FROM monthly_snapshots WHERE snapshot_date = $1", snapshot_date)
-                if snapshot_rows:
-                    await conn.executemany(
-                        "INSERT INTO monthly_snapshots (snapshot_date, duchy, district, total, active) "
-                        "VALUES ($1, $2, $3, $4, $5)",
-                        snapshot_rows
-                    )
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "DELETE FROM monthly_snapshots WHERE snapshot_date = $1", snapshot_date
+            )
+            if snapshot_rows:
+                await conn.executemany(
+                    "INSERT INTO monthly_snapshots (snapshot_date, duchy, district, total, active) "
+                    "VALUES ($1, $2, $3, $4, $5)",
+                    snapshot_rows,
+                )
         logger.info(f"Monthly snapshot saved ({len(snapshot_rows)} rows).")
