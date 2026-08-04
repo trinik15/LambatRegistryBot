@@ -1,8 +1,7 @@
-import discord
-from discord import app_commands
-from typing import List, Optional
 import logging
 from datetime import date, datetime
+
+import discord
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +13,13 @@ MIN_JOIN_DATE = date(2022, 1, 1)
 
 class PaginationView(discord.ui.View):
     """A reusable pagination view for embeds."""
-    def __init__(self, embeds: List[discord.Embed], user: discord.User, timeout: int = 300):
+
+    # Set by callers (``view.message = await interaction.original_response()``)
+    # so on_timeout can edit the originating message. discord.ui.View doesn't
+    # declare this attribute, so we annotate it for mypy.
+    message: discord.Message | None = None
+
+    def __init__(self, embeds: list[discord.Embed], user: discord.User, timeout: int = 300):
         super().__init__(timeout=timeout)
         self.embeds = embeds
         self.user = user
@@ -26,13 +31,15 @@ class PaginationView(discord.ui.View):
 
     def update_buttons(self):
         """Enable/disable navigation buttons based on current page."""
-        self.children[0].disabled = self.current_page == 0  # Previous button
-        self.children[1].disabled = self.current_page == self.total_pages - 1  # Next button
+        self.children[0].disabled = self.current_page == 0  # type: ignore[attr-defined]  # Previous button
+        self.children[1].disabled = self.current_page == self.total_pages - 1  # type: ignore[attr-defined]  # Next button
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Ensure only the command user can interact with the buttons."""
         if interaction.user.id != self.user.id:
-            await interaction.response.send_message("You cannot control this pagination.", ephemeral=True)
+            await interaction.response.send_message(
+                "You cannot control this pagination.", ephemeral=True
+            )
             return False
         return True
 
@@ -81,9 +88,9 @@ def is_valid_date(date_str: str) -> bool:
     today = date.today()
     if parsed > today:
         return False
-    if parsed < MIN_JOIN_DATE:
-        return False
-    return True
+    # MIN_JOIN_DATE = CivMC launch (2022-01-01); no citizen could have joined
+    # a CivMC nation before CivMC existed.
+    return parsed >= MIN_JOIN_DATE
 
 
 def parse_join_date(date_str: str):
@@ -94,6 +101,7 @@ def parse_join_date(date_str: str):
     a DATE column is accidentally stringified).
     """
     from datetime import datetime
+
     if date_str is None:
         return None
     if isinstance(date_str, str):
@@ -119,6 +127,7 @@ def format_date(value, fmt: str = "%d/%m/%Y") -> str:
     DD/MM/YYYY strings, YYYY-MM-DD strings, and None.
     """
     from datetime import date, datetime
+
     if value is None:
         return "N/A"
     if isinstance(value, (date, datetime)):

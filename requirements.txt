@@ -2,3 +2,7 @@ aiohttp>=3.13.3
 discord-py>=2.6.4
 asyncpg>=0.29.0
 matplotlib>=3.7.0
+# Phase 1: structured logging + Prometheus metrics are now used at startup
+# (core/logging_config.py, core/metrics.py) and are therefore runtime deps.
+structlog>=24.1.0
+prometheus-client>=0.20.0

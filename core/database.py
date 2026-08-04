@@ -1,7 +1,8 @@
-import os
-import logging
-import asyncpg
 import asyncio
+import logging
+
+import asyncpg
+
 from core.config import Config
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ async def get_pool() -> asyncpg.Pool:
     if _pool is None:
         async with _pool_lock:
             if _pool is None:  # Double-checked locking
-                logger.info(f"Initializing database connection pool with min_size=2, max_size=10")
+                logger.info("Initializing database connection pool with min_size=2, max_size=10")
                 _pool = await asyncpg.create_pool(
                     DATABASE_URL,
                     min_size=2,
@@ -54,7 +55,7 @@ async def init_db():
     """
     pool = await get_pool()
     try:
-        async with pool.acquire() as conn:
+        async with pool.acquire() as conn:  # noqa: SIM117 — nested transaction reads cleaner
             async with conn.transaction():
                 # citext extension must exist before any CITEXT column can be
                 # created (fresh installs) or altered into (upgrades).
@@ -99,8 +100,12 @@ async def init_db():
                         UNIQUE(snapshot_date, duchy, district)
                     )
                 """)
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_citizens_settlement ON citizens(settlement)")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_citizens_discord ON citizens(discord_id)")
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_citizens_settlement ON citizens(settlement)"
+                )
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_citizens_discord ON citizens(discord_id)"
+                )
 
                 # --- Idempotent migrations for existing TEXT-based installs ---
 
@@ -109,7 +114,7 @@ async def init_db():
                     "SELECT udt_name FROM information_schema.columns "
                     "WHERE table_name = 'citizens' AND column_name = 'ign'"
                 )
-                if col_ign and col_ign['udt_name'] == 'text':
+                if col_ign and col_ign["udt_name"] == "text":
                     # Drop the FK temporarily so both columns can be altered.
                     await conn.execute(
                         "ALTER TABLE activity_cache DROP CONSTRAINT IF EXISTS activity_cache_ign_fkey"
@@ -126,14 +131,16 @@ async def init_db():
                         "ADD CONSTRAINT activity_cache_ign_fkey "
                         "FOREIGN KEY (ign) REFERENCES citizens(ign) ON DELETE CASCADE"
                     )
-                    logger.info("Migrated citizens.ign and activity_cache.ign to CITEXT (case-insensitive).")
+                    logger.info(
+                        "Migrated citizens.ign and activity_cache.ign to CITEXT (case-insensitive)."
+                    )
 
                 # join_date TEXT (DD/MM/YYYY) -> DATE
                 col_jd = await conn.fetchrow(
                     "SELECT data_type FROM information_schema.columns "
                     "WHERE table_name = 'citizens' AND column_name = 'join_date'"
                 )
-                if col_jd and col_jd['data_type'] == 'text':
+                if col_jd and col_jd["data_type"] == "text":
                     # to_date returns NULL for unparseable input; the column is
                     # NOT NULL so any NULL would abort the migration loudly
                     # (which is the safe outcome -- better than silent corruption).
@@ -152,7 +159,7 @@ async def init_db():
                     "SELECT udt_name FROM information_schema.columns "
                     "WHERE table_name = 'settlements' AND column_name = 'name'"
                 )
-                if col_settlement_name and col_settlement_name['udt_name'] == 'text':
+                if col_settlement_name and col_settlement_name["udt_name"] == "text":
                     # Drop the FK temporarily so both columns can be altered.
                     await conn.execute(
                         "ALTER TABLE citizens DROP CONSTRAINT IF EXISTS citizens_settlement_fkey"
@@ -169,7 +176,9 @@ async def init_db():
                         "ADD CONSTRAINT citizens_settlement_fkey "
                         "FOREIGN KEY (settlement) REFERENCES settlements(name) ON DELETE RESTRICT"
                     )
-                    logger.info("Migrated settlements.name and citizens.settlement to CITEXT (case-insensitive).")
+                    logger.info(
+                        "Migrated settlements.name and citizens.settlement to CITEXT (case-insensitive)."
+                    )
 
         logger.info("Database tables and indexes verified/created successfully.")
     except Exception as e:
@@ -177,8 +186,14 @@ async def init_db():
         raise
 
 
-async def execute_query(query: str, params: tuple = (), fetch_one: bool = False,
-                        fetch_all: bool = False, commit: bool = True, connection=None):
+async def execute_query(
+    query: str,
+    params: tuple = (),
+    fetch_one: bool = False,
+    fetch_all: bool = False,
+    commit: bool = True,
+    connection=None,
+):
     """
     Execute a database query with optional transaction control.
     If a connection is provided, the query runs within that connection's transaction.

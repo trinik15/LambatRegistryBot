@@ -1,17 +1,18 @@
-import discord
-from discord import app_commands
-from discord.ext import commands
-from core import database as db
-from core.config import Config
-from api import civinfo_api
-from tasks.activity_monitor import _fetch_activities
-import logging
 import asyncio
 import csv
 import io
-from typing import Optional, List, Dict, Any
+import logging
 from collections import defaultdict
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
 import utils
+from api import civinfo_api
+from core import database as db
+from core.config import Config
+from tasks.activity_monitor import _fetch_activities
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +48,14 @@ class ReportsCog(commands.Cog):
 
     @reports_group.command(name="census", description="Generate population census report")
     @app_commands.autocomplete(settlement=settlement_autocomplete)
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_census"))
-    async def report_census(self, interaction: discord.Interaction, settlement: Optional[str] = None):
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_census")
+    )
+    async def report_census(self, interaction: discord.Interaction, settlement: str | None = None):
         if not self.has_view_access(interaction):
-            return await interaction.response.send_message("❌ You don't have permission to view reports.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ You don't have permission to view reports.", ephemeral=True
+            )
 
         await interaction.response.defer()
 
@@ -58,18 +63,21 @@ class ReportsCog(commands.Cog):
         if settlement:
             rows = await db.execute_query(
                 "SELECT ign, settlement, discord_id, join_date FROM citizens WHERE settlement = $1 ORDER BY ign",
-                (settlement,), fetch_all=True
+                (settlement,),
+                fetch_all=True,
             )
             title = f"📊 Census Report: {settlement}"
         else:
             rows = await db.execute_query(
                 "SELECT ign, settlement, discord_id, join_date FROM citizens ORDER BY settlement, ign",
-                fetch_all=True
+                fetch_all=True,
             )
             title = "📊 National Census Report"
 
         if not rows:
-            await interaction.followup.send("No citizens found matching the criteria.", ephemeral=True)
+            await interaction.followup.send(
+                "No citizens found matching the criteria.", ephemeral=True
+            )
             return
 
         # Group by settlement for display
@@ -103,7 +111,8 @@ class ReportsCog(commands.Cog):
             for citizen in citizens:
                 ign = citizen["ign"]
                 status, emoji, last_login, status_text = activities.get(
-                    ign, ("error", "⚪", None, "Error"))
+                    ign, ("error", "⚪", None, "Error")
+                )
                 activity_data[ign] = {"emoji": emoji, "status": status_text, "raw_status": status}
 
             # civinfo_api returns emoji 🟢 (active <30d), 🟠 (semi 30-60d),
@@ -134,8 +143,10 @@ class ReportsCog(commands.Cog):
 
             # Chunk citizens so we actually show all of them instead of lying
             # about the count (old code broke after 20 but reported len(citizens)).
-            chunks = [citizens[i:i + CITIZENS_PER_FIELD]
-                      for i in range(0, len(citizens), CITIZENS_PER_FIELD)] or [[]]
+            chunks = [
+                citizens[i : i + CITIZENS_PER_FIELD]
+                for i in range(0, len(citizens), CITIZENS_PER_FIELD)
+            ] or [[]]
             num_chunks = len(chunks)
 
             for idx, chunk in enumerate(chunks, start=1):
@@ -145,8 +156,7 @@ class ReportsCog(commands.Cog):
 
                 part_label = f" ({idx}/{num_chunks})" if num_chunks > 1 else ""
                 embed = discord.Embed(
-                    title=f"{title} - {settlement_name}{part_label}",
-                    color=0x7289DA
+                    title=f"{title} - {settlement_name}{part_label}", color=0x7289DA
                 )
                 if chunk:
                     citizen_lines = []
@@ -157,7 +167,7 @@ class ReportsCog(commands.Cog):
                     embed.add_field(
                         name=f"Citizens ({len(citizens)} total, showing {len(chunk)})",
                         value="\n".join(citizen_lines),
-                        inline=True
+                        inline=True,
                     )
                     embed.add_field(name="Activity", value=activity_field, inline=True)
                     shown_citizens += len(chunk)
@@ -174,17 +184,23 @@ class ReportsCog(commands.Cog):
             # rather than silently dropping settlements.
             last = embeds[-1]
             note = last.footer.text or ""
-            last.set_footer(text=f"{note} | ⚠️ Report truncated ({MAX_EMBEDS}-page limit) — refine with /report census <settlement>")
+            last.set_footer(
+                text=f"{note} | ⚠️ Report truncated ({MAX_EMBEDS}-page limit) — refine with /report census <settlement>"
+            )
 
         view = utils.PaginationView(embeds, interaction.user, timeout=300)
         await interaction.followup.send(embed=embeds[0], view=view)
         view.message = await interaction.original_response()
 
     @reports_group.command(name="stats", description="Show population statistics")
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "report_stats"))
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "report_stats")
+    )
     async def report_stats(self, interaction: discord.Interaction):
         if not self.has_view_access(interaction):
-            return await interaction.response.send_message("❌ You don't have permission to view statistics.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ You don't have permission to view statistics.", ephemeral=True
+            )
 
         await interaction.response.defer()
 
@@ -195,11 +211,13 @@ class ReportsCog(commands.Cog):
         # Get citizens by settlement
         settlement_stats = await db.execute_query(
             "SELECT settlement, COUNT(*) FROM citizens GROUP BY settlement ORDER BY COUNT(*) DESC",
-            fetch_all=True
+            fetch_all=True,
         )
 
         # Get total settlements
-        settlement_count = await db.execute_query("SELECT COUNT(*) FROM settlements", fetch_one=True)
+        settlement_count = await db.execute_query(
+            "SELECT COUNT(*) FROM settlements", fetch_one=True
+        )
         total_settlements = settlement_count[0] if settlement_count else 0
 
         # Get recent joins (last 30 days)
@@ -207,20 +225,19 @@ class ReportsCog(commands.Cog):
         # compare chronologically instead of lexicographically.
         recent_result = await db.execute_query(
             "SELECT COUNT(*) FROM citizens WHERE join_date >= CURRENT_DATE - INTERVAL '30 days'",
-            fetch_one=True
+            fetch_one=True,
         )
         recent_joins = recent_result[0] if recent_result else 0
 
-        embed = discord.Embed(
-            title="📈 Population Statistics",
-            color=0x7289DA
-        )
+        embed = discord.Embed(title="📈 Population Statistics", color=0x7289DA)
         embed.add_field(name="Total Citizens", value=str(total_citizens), inline=True)
         embed.add_field(name="Total Settlements", value=str(total_settlements), inline=True)
         embed.add_field(name="Recent Joins (30d)", value=str(recent_joins), inline=True)
 
         if settlement_stats:
-            stats_text = "\n".join(f"• {row['settlement']}: {row['count']}" for row in settlement_stats[:10])
+            stats_text = "\n".join(
+                f"• {row['settlement']}: {row['count']}" for row in settlement_stats[:10]
+            )
             if len(settlement_stats) > 10:
                 stats_text += f"\n*and {len(settlement_stats) - 10} more settlements...*"
             embed.add_field(name="Top Settlements", value=stats_text, inline=False)
@@ -228,10 +245,14 @@ class ReportsCog(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     @reports_group.command(name="trends", description="Show historical population trend charts")
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_trends"))
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_trends")
+    )
     async def report_trends(self, interaction: discord.Interaction):
         if not self.has_view_access(interaction):
-            return await interaction.response.send_message("❌ You don't have permission to view trends.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ You don't have permission to view trends.", ephemeral=True
+            )
 
         await interaction.response.defer()
 
@@ -241,13 +262,13 @@ class ReportsCog(commands.Cog):
             "SELECT snapshot_date, duchy, district, total, active "
             "FROM monthly_snapshots WHERE district IS NULL "
             "ORDER BY snapshot_date",
-            fetch_all=True
+            fetch_all=True,
         )
 
         if not snapshots:
             await interaction.followup.send(
                 "No monthly snapshots found yet. Snapshots are generated on the 1st of each month by the daily activity check.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
@@ -256,20 +277,20 @@ class ReportsCog(commands.Cog):
         top_settlement_names = await db.execute_query(
             "SELECT settlement, COUNT(*) as cnt FROM citizens "
             "GROUP BY settlement ORDER BY cnt DESC LIMIT 8",
-            fetch_all=True
+            fetch_all=True,
         )
         top_names = [r["settlement"] for r in top_settlement_names] if top_settlement_names else []
 
         top_settlements = []
         if top_names:
             # Build a parameterized IN-clause ($1, $2, ...)
-            placeholders = ", ".join(f"${i+1}" for i in range(len(top_names)))
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(top_names)))
             top_settlements = await db.execute_query(
                 f"SELECT snapshot_date, district, total FROM monthly_snapshots "
                 f"WHERE district IN ({placeholders}) "
                 f"ORDER BY snapshot_date",
                 tuple(top_names),
-                fetch_all=True
+                fetch_all=True,
             )
 
         # Render the chart in an executor (matplotlib is sync / CPU-bound).
@@ -280,13 +301,13 @@ class ReportsCog(commands.Cog):
                 None,
                 charts.render_population_trends,
                 snapshots,
-                top_settlements if top_settlements else None
+                top_settlements if top_settlements else None,
             )
         except Exception as e:
             logger.error(f"Failed to render trends chart: {e}", exc_info=True)
             await interaction.followup.send(
                 "❌ Could not render the trend chart. Please try again later or contact an admin.",
-                ephemeral=True
+                ephemeral=True,
             )
             return
 
@@ -297,7 +318,7 @@ class ReportsCog(commands.Cog):
             return
 
         # Build a summary embed alongside the chart.
-        dates = sorted(set(s["snapshot_date"] for s in snapshots))
+        dates = sorted({s["snapshot_date"] for s in snapshots})
         first_date = dates[0]
         last_date = dates[-1]
 
@@ -316,7 +337,7 @@ class ReportsCog(commands.Cog):
                 f"Monthly snapshots from **{utils.format_date(first_date)}** "
                 f"to **{utils.format_date(last_date)}** ({len(dates)} data points)"
             ),
-            color=0x3BAD4C
+            color=0x3BAD4C,
         )
         embed.add_field(name="Current Total", value=str(latest_total), inline=True)
         embed.add_field(name="Current Active", value=str(latest_active), inline=True)
@@ -328,33 +349,39 @@ class ReportsCog(commands.Cog):
             embed.add_field(
                 name=f"Growth (since {utils.format_date(first_date)})",
                 value=f"{sign}{growth} ({sign}{pct}%)",
-                inline=True
+                inline=True,
             )
 
         embed.add_field(
             name="Active Rate",
-            value=f"{round(latest_active/latest_total*100, 1)}%" if latest_total else "N/A",
-            inline=True
+            value=f"{round(latest_active / latest_total * 100, 1)}%" if latest_total else "N/A",
+            inline=True,
         )
 
         embed.set_image(url="attachment://trends.png")
-        embed.set_footer(text="Charts rendered from monthly_snapshots • Generated by /report trends")
+        embed.set_footer(
+            text="Charts rendered from monthly_snapshots • Generated by /report trends"
+        )
 
         file = discord.File(io.BytesIO(png_bytes), filename="trends.png")
         await interaction.followup.send(embed=embed, file=file)
 
     @reports_group.command(name="export", description="Export citizen data as CSV")
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_export"))
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_export")
+    )
     async def report_export(self, interaction: discord.Interaction):
         if not self.has_view_access(interaction):
-            return await interaction.response.send_message("❌ You don't have permission to export data.", ephemeral=True)
+            return await interaction.response.send_message(
+                "❌ You don't have permission to export data.", ephemeral=True
+            )
 
         await interaction.response.defer()
 
         rows = await db.execute_query(
             "SELECT ign, discord_id, settlement, join_date, address, mailbox, "
             "recruiter_ids, notes FROM citizens ORDER BY settlement, ign",
-            fetch_all=True
+            fetch_all=True,
         )
 
         if not rows:
@@ -364,19 +391,32 @@ class ReportsCog(commands.Cog):
         # Create CSV in memory
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["IGN", "Discord ID", "Settlement", "Join Date", "Address", "Mailbox", "Recruiter IDs", "Notes"])
+        writer.writerow(
+            [
+                "IGN",
+                "Discord ID",
+                "Settlement",
+                "Join Date",
+                "Address",
+                "Mailbox",
+                "Recruiter IDs",
+                "Notes",
+            ]
+        )
 
         for row in rows:
-            writer.writerow([
-                row["ign"],
-                row["discord_id"],
-                row["settlement"],
-                utils.format_date(row["join_date"]),
-                row["address"] or "",
-                row["mailbox"] or "",
-                row["recruiter_ids"] or "",
-                row["notes"] or "",
-            ])
+            writer.writerow(
+                [
+                    row["ign"],
+                    row["discord_id"],
+                    row["settlement"],
+                    utils.format_date(row["join_date"]),
+                    row["address"] or "",
+                    row["mailbox"] or "",
+                    row["recruiter_ids"] or "",
+                    row["notes"] or "",
+                ]
+            )
 
         output.seek(0)
         file = discord.File(io.BytesIO(output.getvalue().encode()), filename="citizens_export.csv")
@@ -384,7 +424,7 @@ class ReportsCog(commands.Cog):
         embed = discord.Embed(
             title="📎 Data Export",
             description=f"Exported {len(rows)} citizens to CSV.",
-            color=0x43B581
+            color=0x43B581,
         )
         await interaction.followup.send(embed=embed, file=file)
 

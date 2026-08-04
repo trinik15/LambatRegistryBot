@@ -1,26 +1,24 @@
-import discord
-from discord import app_commands
-from discord.ext import commands, tasks
+import asyncio
 import logging
 import os
+from datetime import UTC, datetime, timedelta
+
 import aiohttp
-import asyncio
-from datetime import datetime, timedelta, timezone
-from core.config import Config
+import discord
+from discord.ext import commands, tasks
+
 from core import database as db
+from core.config import Config
+from core.logging_config import setup_logging
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
 from tasks.uptime_monitor import UptimeMonitor
 from web.health import start_health_server
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('lambat_bot.log'),
-        logging.StreamHandler()
-    ]
-)
+# Configure logging BEFORE anything else logs. setup_logging() reads env vars
+# directly (LOG_FORMAT/LOG_LEVEL/LOG_FILE/SENTRY_DSN) so it works even if a
+# later import (e.g. Config validation) fails and needs readable output.
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -30,11 +28,7 @@ class LambatRegistryBot(commands.Bot):
         intents.members = True
         # message_content is NOT needed — this bot is slash-command-only.
         # Keeping it off follows the principle of least privilege.
-        super().__init__(
-            command_prefix="!",
-            intents=intents,
-            proxy=Config.PROXY_URL
-        )
+        super().__init__(command_prefix="!", intents=intents, proxy=Config.PROXY_URL)
         self.http_session = None
         self.activity_monitor = None
         self.uptime_monitor = None
@@ -56,15 +50,14 @@ class LambatRegistryBot(commands.Bot):
 
         # 2. Set up HTTP session for CivInfo API
         timeout = aiohttp.ClientTimeout(
-            total=Config.AIOHTTP_TOTAL_TIMEOUT,
-            connect=Config.AIOHTTP_CONNECT_TIMEOUT
+            total=Config.AIOHTTP_TOTAL_TIMEOUT, connect=Config.AIOHTTP_CONNECT_TIMEOUT
         )
         self.http_session = aiohttp.ClientSession(timeout=timeout)
 
         # 3. Initialize activity monitor
         self.activity_monitor = ActivityMonitor(self)
         logger.info("ActivityMonitor initialized in setup_hook")
-        if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
+        if self.activity_monitor and hasattr(self.activity_monitor, "daily_check"):
             self.activity_monitor.daily_check.start()
             logger.info(f"daily_check started: {self.activity_monitor.daily_check.is_running()}")
         else:
@@ -94,7 +87,9 @@ class LambatRegistryBot(commands.Bot):
         #     and /metrics (basic Prometheus text). See web/health.py.
         try:
             start_health_server(self)
-            logger.info(f"Health/keep-alive server started on port {os.environ.get('PORT', 10000)}.")
+            logger.info(
+                f"Health/keep-alive server started on port {os.environ.get('PORT', 10000)}."
+            )
         except Exception as e:
             logger.warning(f"Failed to start health/keep-alive server: {e}")
 
@@ -118,27 +113,60 @@ class LambatRegistryBot(commands.Bot):
             logger.info(f"Synced {len(synced)} commands to guild {Config.GUILD_ID} (instant).")
         else:
             synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} commands globally (may take up to 1h to propagate). "
-                        f"Set GUILD_ID in .env for instant updates.")
+            logger.info(
+                f"Synced {len(synced)} commands globally (may take up to 1h to propagate). "
+                f"Set GUILD_ID in .env for instant updates."
+            )
         commands_list = [cmd.name for cmd in self.tree.get_commands()]
         logger.info(f"Registered commands: {commands_list}")
 
         # Set custom error handler for app command errors (rate limits, etc.)
-        self.tree.on_error = self.on_app_command_error
+        self.tree.on_error = self.on_app_command_error  # type: ignore[method-assign]
 
-    async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+    # ------------------------------------------------------------------
+    # Gateway lifecycle hooks (Phase 1.4 observability).
+    # These log every gateway state transition so operators can correlate
+    # command failures / dropped alerts with gateway reconnects.
+    # ------------------------------------------------------------------
+    async def on_connect(self):
+        logger.info("Discord gateway: connected (initial handshake).")
+
+    async def on_ready(self):
+        guilds = len(self.guilds) if self.guilds else 0
+        logger.info(
+            "Discord gateway: READY. Logged in as %s (id=%s). Guilds visible: %d.",
+            self.user,
+            self.user.id if self.user else "n/a",
+            guilds,
+        )
+
+    async def on_resumed(self):
+        # A RESUMED session means we reconnected WITHOUT losing events — much
+        # better than a full re-READY. Still worth logging so a flaky network
+        # is visible.
+        logger.info("Discord gateway: session RESUMED (reconnected without replay).")
+
+    async def on_disconnect(self):
+        # discord.py fires this on ANY gateway disconnect, including the clean
+        # shutdown path. Logged at WARNING so it stands out in aggregators; the
+        # close() method logs the clean-shutdown context separately.
+        logger.warning("Discord gateway: DISCONNECTED. Will retry automatically.")
+
+    async def on_app_command_error(
+        self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError
+    ):
         """Handle application command errors with special handling for rate limits."""
         # Handle rate limit errors specially
         if isinstance(error, discord.app_commands.CommandOnCooldown):
             embed = discord.Embed(
                 title="⏳ Rate Limited",
                 description=f"Please wait **{error.retry_after:.1f} seconds** before using this command again.",
-                color=0xFFCC00
+                color=0xFFCC00,
             )
             embed.add_field(
                 name="Why?",
                 value="This prevents server overload and ensures fair usage for everyone.",
-                inline=False
+                inline=False,
             )
             try:
                 if not interaction.response.is_done():
@@ -150,11 +178,13 @@ class LambatRegistryBot(commands.Bot):
             return
 
         # General error handling for other errors
-        logger.error(f"Unhandled app command error in {interaction.command}: {error}", exc_info=True)
+        logger.error(
+            f"Unhandled app command error in {interaction.command}: {error}", exc_info=True
+        )
         embed = discord.Embed(
             title="❌ Unexpected Error",
             description="An unexpected error occurred. The developers have been notified.",
-            color=0xED4245
+            color=0xED4245,
         )
         try:
             if not interaction.response.is_done():
@@ -170,7 +200,7 @@ class LambatRegistryBot(commands.Bot):
         try:
             # Tag the 1st-of-month backup as "monthly" so prune_backups preserves
             # it as long-term history (it's never auto-deleted by retention).
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             note = "monthly" if now.day == 1 else "daily_scheduled"
             await backup.create_backup("auto", note)
             logger.info(f"Daily backup created successfully (note={note}).")
@@ -182,7 +212,7 @@ class LambatRegistryBot(commands.Bot):
         await self.wait_until_ready()
         # Schedule for 02:00 UTC (consistent across deployments regardless of
         # the host's local timezone). Override by changing the hour below.
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         target = now.replace(hour=2, minute=0, second=0, microsecond=0)
         if now > target:
             target += timedelta(days=1)
@@ -196,7 +226,7 @@ class LambatRegistryBot(commands.Bot):
         logger.info("Shutting down bot...")
 
         # Stop the daily_check loop if it's running
-        if self.activity_monitor and hasattr(self.activity_monitor, 'daily_check'):
+        if self.activity_monitor and hasattr(self.activity_monitor, "daily_check"):
             self.activity_monitor.daily_check.cancel()
             logger.info("Stopped daily_check loop")
 
@@ -224,8 +254,12 @@ class LambatRegistryBot(commands.Bot):
 
 async def main():
     bot = LambatRegistryBot()
+    # Config.validate_config() guarantees DISCORD_TOKEN is set (it raises on
+    # import otherwise), but mypy sees it as str | None from os.getenv.
+    token = Config.DISCORD_TOKEN
+    assert token is not None, "DISCORD_TOKEN is set (validate_config enforces it)"
     try:
-        await bot.start(Config.DISCORD_TOKEN)
+        await bot.start(token)
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     finally:

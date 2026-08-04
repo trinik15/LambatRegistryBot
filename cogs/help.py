@@ -1,8 +1,10 @@
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
+
 from core.config import Config
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,7 @@ class HelpCog(commands.Cog):
                 "Official bot for tracking citizens, settlements, and population "
                 "trends for the Lambat nation on CivMC."
             ),
-            color=0x5865F2
+            color=0x5865F2,
         )
         embed.add_field(
             name="👤 Citizen Commands",
@@ -30,7 +32,7 @@ class HelpCog(commands.Cog):
                 "`/citizen list` – List all citizens by settlement\n"
                 "`/citizen dossier` – View a citizen's full dossier"
             ),
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="🏘️ Settlement Commands",
@@ -39,7 +41,7 @@ class HelpCog(commands.Cog):
                 "`/settlement remove` – Remove an empty settlement *(Council only)*\n"
                 "`/settlement list` – List all settlements"
             ),
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="📊 Reports",
@@ -49,7 +51,7 @@ class HelpCog(commands.Cog):
                 "`/report trends` – Historical population trend charts\n"
                 "`/report export` – Download citizen data as CSV"
             ),
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="🖥️ CivMC Server",
@@ -57,7 +59,7 @@ class HelpCog(commands.Cog):
                 "`/server status` – Live server status, player count, MOTD\n"
                 "`/server ping` – Quick one-line server check"
             ),
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="💾 Data Management *(Council only)*",
@@ -66,22 +68,24 @@ class HelpCog(commands.Cog):
                 "`/data list_backups` – List all available backups\n"
                 "`/data restore` – Restore the database from a backup"
             ),
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="⚙️ Owner",
             value="`/sync` – Re-sync slash commands to this server *(owner only)*",
-            inline=False
+            inline=False,
         )
         embed.add_field(
             name="Activity Legend",
             value="🟢 Active (<30d)  •  🟠 Semi-Active (30-60d)  •  🔴 Inactive (>60d)  •  ⚪ Unknown",
-            inline=False
+            inline=False,
         )
         embed.set_footer(text="Lambat Registry Bot • Report issues to your nation leadership")
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="sync", description="Re-sync slash commands to this server (owner only)")
+    @app_commands.command(
+        name="sync", description="Re-sync slash commands to this server (owner only)"
+    )
     async def sync(self, interaction: discord.Interaction):
         """Owner-only manual command sync.
 
@@ -90,8 +94,7 @@ class HelpCog(commands.Cog):
         """
         if interaction.user.id != Config.OWNER_ID:
             await interaction.response.send_message(
-                "❌ This command is restricted to the bot owner.",
-                ephemeral=True
+                "❌ This command is restricted to the bot owner.", ephemeral=True
             )
             return
         await interaction.response.defer(ephemeral=True)
@@ -101,20 +104,18 @@ class HelpCog(commands.Cog):
                 self.bot.tree.copy_global_to(guild=guild)
                 synced = await self.bot.tree.sync(guild=guild)
                 await interaction.followup.send(
-                    f"✅ Synced {len(synced)} commands to guild {Config.GUILD_ID}.",
-                    ephemeral=True
+                    f"✅ Synced {len(synced)} commands to guild {Config.GUILD_ID}.", ephemeral=True
                 )
             else:
                 synced = await self.bot.tree.sync()
                 await interaction.followup.send(
                     f"✅ Synced {len(synced)} commands globally (may take up to 1h to appear).",
-                    ephemeral=True
+                    ephemeral=True,
                 )
         except Exception as e:
             logger.error(f"Manual sync failed: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ Sync failed. Check the bot logs for details.",
-                ephemeral=True
+                "❌ Sync failed. Check the bot logs for details.", ephemeral=True
             )
 
 

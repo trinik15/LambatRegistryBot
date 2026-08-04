@@ -166,8 +166,11 @@ These are concrete defects/risks I observed in the source, not generic advice.
 Each phase is independently shippable. Effort estimates are rough (S ≈ half a day,
 M ≈ 1–2 days, L ≈ 3–5 days) and assume a single contributor who knows discord.py.
 
-> **Status:** ✅ Phase 0 is **implemented** (commit `phase-0-de-risk`).
-> Phases 1–5 remain planned.
+> **Status:** ✅ Phase 0 **implemented** (commit `b9d0d68`).
+> ✅ Phase 1 **implemented** — `pyproject.toml` (ruff/mypy/pytest), GitHub Actions
+> CI, 54 tests covering the honesty branches, structlog JSON logging + gateway
+> lifecycle hooks + optional Sentry, and a Prometheus `/metrics` endpoint.
+> Phases 2–5 remain planned.
 
 ### Phase 0 — Stabilize & de-risk (before adding anything new)
 

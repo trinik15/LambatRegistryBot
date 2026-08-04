@@ -7,9 +7,8 @@ Replaces the old always-200 ``http_keepalive.py``. Three endpoints:
 * ``/healthz`` — honest liveness. Returns 200 **only** when the Discord
   gateway is connected and the database pool answers ``SELECT 1``. Returns
   503 otherwise, so a host liveness probe won't be lied to.
-* ``/metrics`` — minimal Prometheus text-format metrics (process up,
-  gateway ready, CivInfo auth-broken, db reachable). Richer citizen-count
-  metrics are deferred to Phase 1.5.
+* ``/metrics`` — Prometheus text-format metrics (Phase 1.5). Populated by
+  :func:`core.metrics.collect_metrics` then rendered with ``generate_latest``.
 
 The server runs on a daemon thread and uses ``ThreadingTCPServer`` so a
 slow ``/healthz`` DB ping never blocks the keep-alive responses.
@@ -18,12 +17,12 @@ CivMC relevance: leadership and hosting platforms need an honest signal that
 the bot is actually functioning — not just that the process is alive.
 """
 
-import http.server
-import socketserver
-import logging
 import asyncio
+import http.server
+import logging
+import socketserver
 import time
-from typing import Optional
+from typing import Any
 
 from core.config import Config
 
@@ -38,18 +37,15 @@ class _BotHealthState:
     at startup and then read-only, which is safe for our purposes.
     """
 
-    bot = None  # discord.Bot / commands.Bot
-    loop = None  # the bot's asyncio event loop (for run_coroutine_threadsafe)
-
-
-def _bool_to_int(value: bool) -> str:
-    return "1" if value else "0"
+    bot: Any = None  # discord.Bot / commands.Bot
+    loop: Any = None  # asyncio event loop (set at start_health_server)
 
 
 async def _db_ping(bot) -> bool:
     """Run ``SELECT 1`` on the asyncpg pool. True if the DB answers."""
     try:
         from core import database as db
+
         pool = await db.get_pool()
         if pool is None:
             return False
@@ -83,6 +79,7 @@ def _check_civinfo() -> bool:
     """
     try:
         from api import civinfo_api
+
         return not civinfo_api.is_auth_broken()
     except Exception:
         # If we can't even import the module, don't guess — treat as ok
@@ -121,7 +118,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
             try:
                 fut = asyncio.run_coroutine_threadsafe(_db_ping(bot), loop)
                 db_ok = bool(fut.result(timeout=3))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 db_ok = False
             except Exception:
                 db_ok = False
@@ -145,41 +142,35 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         self._send(200 if healthy else 503, "application/json", body)
 
     def _handle_metrics(self):
-        bot = self.state.bot
-        gateway_ok = _check_gateway(bot)
-        civinfo_ok = _check_civinfo()
-        # DB: a quick ping too, so /metrics is self-contained. Reuse the
-        # same coroutine; tolerate failure.
-        db_ok = False
-        loop = self.state.loop
-        if loop is not None:
-            try:
-                fut = asyncio.run_coroutine_threadsafe(_db_ping(bot), loop)
-                db_ok = bool(fut.result(timeout=3))
-            except Exception:
-                db_ok = False
+        # Populated the scrape-time gauges from live DB + in-memory state via
+        # the bot's event loop, then render with prometheus_client.
+        body = b""
+        try:
+            from core import metrics
 
-        lines = [
-            "# HELP lambat_bot_up 1 if the bot process is running.",
-            "# TYPE lambat_bot_up gauge",
-            "lambat_bot_up 1",
-            "# HELP lambat_discord_gateway_ready 1 if the Discord gateway is connected.",
-            "# TYPE lambat_discord_gateway_ready gauge",
-            f"lambat_discord_gateway_ready {_bool_to_int(gateway_ok)}",
-            "# HELP lambat_database_reachable 1 if SELECT 1 answered within timeout.",
-            "# TYPE lambat_database_reachable gauge",
-            f"lambat_database_reachable {_bool_to_int(db_ok)}",
-            "# HELP lambat_civinfo_ok 1 if CivInfo API auth is not broken.",
-            "# TYPE lambat_civinfo_ok gauge",
-            f"lambat_civinfo_ok {_bool_to_int(civinfo_ok)}",
-        ]
-        body = "\n".join(lines) + "\n"
-        self._send(200, "text/plain; version=0.0.4", body)
+            loop = self.state.loop
+            if loop is not None:
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        metrics.collect_metrics(self.state.bot), loop
+                    )
+                    fut.result(timeout=5)
+                except TimeoutError:
+                    logger.warning("metrics collection timed out; rendering last-known values.")
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"metrics collection error: {e}")
+            body, content_type = metrics.render()
+        except Exception as e:  # noqa: BLE001 — never 500 on /metrics
+            logger.error(f"Failed to render metrics: {e}", exc_info=True)
+            body = b"# metrics rendering failed\n"
+            content_type = "text/plain"
+        self._send(200, content_type, body)
 
     # --- helpers ---------------------------------------------------------
 
-    def _send(self, status: int, content_type: str, body: str):
-        data = body.encode("utf-8")
+    def _send(self, status: int, content_type: str, body):
+        """Send a response. ``body`` may be str or bytes."""
+        data = body.encode("utf-8") if isinstance(body, str) else bytes(body)
         self.send_response(status)
         self.send_header("Content-type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -197,6 +188,7 @@ class _ThreadingTCPServer(socketserver.ThreadingTCPServer):
 
     ``allow_reuse_address`` avoids "Address already in use" on quick restarts.
     """
+
     allow_reuse_address = True
     daemon_threads = True
 
@@ -234,5 +226,6 @@ def start_health_server(bot):
 
     port = Config.PORT
     import threading
+
     thread = threading.Thread(target=_run_health_server, args=(port,), daemon=True)
     thread.start()

@@ -6,13 +6,15 @@ key, responds in ~40ms, and returns online count, max slots, version, MOTD,
 and a base64 server icon.
 """
 
+import io
+import logging
+
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
+
 from core.config import Config
-import logging
-import aiohttp
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +38,10 @@ class ServerCog(commands.Cog):
         async with self.bot.http_session.get(url) as resp:
             if resp.status != 200:
                 raise aiohttp.ClientResponseError(
-                    resp.request_info, resp.history,
-                    status=resp.status, message=f"mcsrvstat.us HTTP {resp.status}"
+                    resp.request_info,
+                    resp.history,
+                    status=resp.status,
+                    message=f"mcsrvstat.us HTTP {resp.status}",
                 )
             data = await resp.json()
 
@@ -56,7 +60,9 @@ class ServerCog(commands.Cog):
         }
 
     @server_group.command(name="status", description="Show live CivMC server status")
-    @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "server_status"))
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "server_status")
+    )
     async def server_status(self, interaction: discord.Interaction):
         # Server status is public information (anyone can query mcsrvstat.us),
         # so this command is open to anyone who can see the bot in a guild.
@@ -69,7 +75,7 @@ class ServerCog(commands.Cog):
             embed = discord.Embed(
                 title="🖥️ CivMC Server Status",
                 description="❌ Could not reach the status API. Please try again in a moment.",
-                color=0xED4245
+                color=0xED4245,
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
@@ -81,15 +87,10 @@ class ServerCog(commands.Cog):
             color = 0xED4245
             status_line = "🔴 **Offline**"
 
-        embed = discord.Embed(
-            title="🖥️ CivMC Server Status",
-            color=color
-        )
+        embed = discord.Embed(title="🖥️ CivMC Server Status", color=color)
         embed.add_field(name="Status", value=status_line, inline=True)
         embed.add_field(
-            name="Players",
-            value=f"{s['players_online']} / {s['players_max']}",
-            inline=True
+            name="Players", value=f"{s['players_online']} / {s['players_max']}", inline=True
         )
         embed.add_field(name="Version", value=s["version"], inline=True)
 
@@ -98,11 +99,7 @@ class ServerCog(commands.Cog):
             motd = s["motd"][:250]
             embed.add_field(name="MOTD", value=f"```{motd}```", inline=False)
 
-        embed.add_field(
-            name="Address",
-            value=f"`{Config.SERVER_ADDRESS}`",
-            inline=True
-        )
+        embed.add_field(name="Address", value=f"`{Config.SERVER_ADDRESS}`", inline=True)
         embed.add_field(name="Software", value=s["software"], inline=True)
 
         # Attach the server icon as a thumbnail if present.
@@ -113,10 +110,9 @@ class ServerCog(commands.Cog):
                 header, _, b64 = s["icon"].partition(",")
                 if b64:
                     import base64 as _b64
+
                     icon_bytes = _b64.b64decode(b64)
-                    file = discord.File(
-                        io.BytesIO(icon_bytes), filename="server_icon.png"
-                    )
+                    file = discord.File(io.BytesIO(icon_bytes), filename="server_icon.png")
                     embed.set_thumbnail(url="attachment://server_icon.png")
             except Exception as e:
                 logger.debug(f"Could not decode server icon: {e}")
@@ -140,8 +136,7 @@ class ServerCog(commands.Cog):
         except Exception as e:
             logger.error(f"Server ping failed: {e}", exc_info=True)
             await interaction.followup.send(
-                "🔴 **CivMC** — status API unreachable right now.",
-                ephemeral=True
+                "🔴 **CivMC** — status API unreachable right now.", ephemeral=True
             )
             return
 
@@ -151,9 +146,7 @@ class ServerCog(commands.Cog):
                 f"(v{s['version']})"
             )
         else:
-            await interaction.followup.send(
-                f"🔴 **CivMC** is offline right now."
-            )
+            await interaction.followup.send("🔴 **CivMC** is offline right now.")
 
 
 async def setup(bot):
