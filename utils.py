@@ -2,8 +2,14 @@ import discord
 from discord import app_commands
 from typing import List, Optional
 import logging
+from datetime import date, datetime
 
 logger = logging.getLogger(__name__)
+
+# CivMC launched in 2022; no citizen's join date can legitimately be before
+# this. Used by is_valid_date() to reject impossible / typo'd dates that would
+# otherwise corrupt the "recent joins (30d)" stat and monthly snapshots.
+MIN_JOIN_DATE = date(2022, 1, 1)
 
 
 class PaginationView(discord.ui.View):
@@ -58,13 +64,26 @@ class PaginationView(discord.ui.View):
 
 
 def is_valid_date(date_str: str) -> bool:
-    """Validate a date string in DD/MM/YYYY format."""
-    from datetime import datetime
+    """Validate a join-date string in DD/MM/YYYY format.
+
+    Beyond the format, this also rejects:
+      * dates in the future (a typo like 25/12/2099 would otherwise corrupt
+        the "recent joins (30d)" stat and the monthly snapshot), and
+      * dates before MIN_JOIN_DATE (2022-01-01, CivMC's launch) — no citizen
+        can have joined a CivMC nation before CivMC existed.
+
+    Returns True only for a real, in-range, non-future date.
+    """
     try:
-        datetime.strptime(date_str, "%d/%m/%Y")
-        return True
-    except ValueError:
+        parsed = datetime.strptime(date_str, "%d/%m/%Y").date()
+    except (ValueError, TypeError):
         return False
+    today = date.today()
+    if parsed > today:
+        return False
+    if parsed < MIN_JOIN_DATE:
+        return False
+    return True
 
 
 def parse_join_date(date_str: str):

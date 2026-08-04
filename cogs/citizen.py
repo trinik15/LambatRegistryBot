@@ -404,11 +404,17 @@ class CitizenCog(commands.Cog):
 
         if join_date is not None:
             if not utils.is_valid_date(join_date):
-                await interaction.followup.send("❌ Invalid date format. Please use DD/MM/YYYY (e.g., 25/12/2024).", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ Invalid join date. Please use DD/MM/YYYY (e.g., 25/12/2024). "
+                    "The date must be in the past and no earlier than 01/01/2022 (CivMC launch).",
+                    ephemeral=True)
                 return
             new_join_date_obj = utils.parse_join_date(join_date)
             if new_join_date_obj is None:
-                await interaction.followup.send("❌ Invalid date. Please use DD/MM/YYYY (e.g., 25/12/2024).", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ Invalid join date. Please use DD/MM/YYYY (e.g., 25/12/2024). "
+                    "The date must be real, in the past, and on/after 01/01/2022.",
+                    ephemeral=True)
                 return
             # old_join_date is a DATE object after migration; normalise for compare
             old_jd_obj = utils.parse_join_date(old_join_date) if not hasattr(old_join_date, "year") else old_join_date

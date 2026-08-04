@@ -63,14 +63,14 @@ async def init_db():
                 # --- Tables (fresh install uses CITEXT/DATE directly) ---
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS settlements (
-                        name TEXT PRIMARY KEY
+                        name CITEXT PRIMARY KEY
                     )
                 """)
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS citizens (
                         ign CITEXT PRIMARY KEY,
                         discord_id TEXT UNIQUE NOT NULL,
-                        settlement TEXT NOT NULL,
+                        settlement CITEXT NOT NULL,
                         recruiter_ids TEXT NOT NULL,
                         address TEXT,
                         mailbox TEXT,
@@ -142,6 +142,34 @@ async def init_db():
                         "USING to_date(join_date, 'DD/MM/YYYY')"
                     )
                     logger.info("Migrated citizens.join_date from TEXT to DATE.")
+
+                # settlements.name + citizens.settlement: TEXT -> CITEXT
+                # (case-insensitive settlement names + case-insensitive FK).
+                # Without this, "New September" and "new september" would be
+                # two different settlements, and the role lookup (which matches
+                # by name) would silently fail for one of them.
+                col_settlement_name = await conn.fetchrow(
+                    "SELECT udt_name FROM information_schema.columns "
+                    "WHERE table_name = 'settlements' AND column_name = 'name'"
+                )
+                if col_settlement_name and col_settlement_name['udt_name'] == 'text':
+                    # Drop the FK temporarily so both columns can be altered.
+                    await conn.execute(
+                        "ALTER TABLE citizens DROP CONSTRAINT IF EXISTS citizens_settlement_fkey"
+                    )
+                    await conn.execute(
+                        "ALTER TABLE settlements ALTER COLUMN name TYPE CITEXT USING name::CITEXT"
+                    )
+                    await conn.execute(
+                        "ALTER TABLE citizens ALTER COLUMN settlement TYPE CITEXT USING settlement::CITEXT"
+                    )
+                    # Recreate the FK with the same ON DELETE RESTRICT rule.
+                    await conn.execute(
+                        "ALTER TABLE citizens "
+                        "ADD CONSTRAINT citizens_settlement_fkey "
+                        "FOREIGN KEY (settlement) REFERENCES settlements(name) ON DELETE RESTRICT"
+                    )
+                    logger.info("Migrated settlements.name and citizens.settlement to CITEXT (case-insensitive).")
 
         logger.info("Database tables and indexes verified/created successfully.")
     except Exception as e:

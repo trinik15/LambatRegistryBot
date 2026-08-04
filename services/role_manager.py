@@ -7,6 +7,21 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _find_role_by_name(guild: discord.Guild, name: str) -> Optional[discord.Role]:
+    """Case-insensitive role lookup by name.
+
+    Settlement names are CITEXT (case-insensitive) in the DB, so the Discord
+    role lookup must also be case-insensitive — otherwise a settlement added
+    as "New September" never gets its role assigned if the Discord role is
+    "new september" (or vice versa). Returns None if no match.
+    """
+    if not name:
+        return None
+    target = name.lower()
+    return discord.utils.find(lambda r: r.name.lower() == target, guild.roles)
+
+
 async def assign_citizen_roles(member: discord.Member, settlement: str):
     """Assign all citizen roles to a member with error handling."""
     try:
@@ -16,7 +31,7 @@ async def assign_citizen_roles(member: discord.Member, settlement: str):
         guest_role = guild.get_role(Config.GUEST_ROLE_ID)
         citizen_roles = [guild.get_role(rid) for rid in Config.CITIZEN_ROLE_IDS if guild.get_role(rid)]
         settler_role = guild.get_role(Config.SETTLER_ROLE_ID)
-        settlement_role = discord.utils.get(guild.roles, name=settlement)
+        settlement_role = _find_role_by_name(guild, settlement)
 
         if guest_role:
             await member.remove_roles(guest_role)
@@ -51,7 +66,7 @@ async def remove_all_citizen_roles(member: discord.Member, settlement: Optional[
         if settler_role:
             roles_to_remove.append(settler_role)
         if settlement:
-            settlement_role = discord.utils.get(guild.roles, name=settlement)
+            settlement_role = _find_role_by_name(guild, settlement)
             if settlement_role:
                 roles_to_remove.append(settlement_role)
 
@@ -74,8 +89,8 @@ async def update_settlement_role(member: discord.Member, old_settlement: str, ne
     """Update settlement role for a member with error handling."""
     try:
         guild = member.guild
-        old_role = discord.utils.get(guild.roles, name=old_settlement)
-        new_role = discord.utils.get(guild.roles, name=new_settlement)
+        old_role = _find_role_by_name(guild, old_settlement)
+        new_role = _find_role_by_name(guild, new_settlement)
 
         if old_role and old_role in member.roles:
             await member.remove_roles(old_role)
