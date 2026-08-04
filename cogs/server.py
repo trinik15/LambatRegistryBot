@@ -14,6 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from core import database as db
 from core.config import Config
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ class ServerCog(commands.Cog):
             "online": bool(data.get("online")),
             "players_online": players.get("online", 0),
             "players_max": players.get("max", 0),
+            "players_list": players.get("list") or [],  # Phase 3.8: list of online IGNs
             "version": data.get("version", "unknown"),
             "motd": " | ".join(motd_lines).strip() if motd_lines else "",
             "icon": data.get("icon"),  # base64 data URI, or None
@@ -147,6 +149,143 @@ class ServerCog(commands.Cog):
             )
         else:
             await interaction.followup.send("🔴 **CivMC** is offline right now.")
+
+    @server_group.command(
+        name="online", description="Show which Lambat citizens are online on CivMC right now"
+    )
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "server_online")
+    )
+    async def server_online(self, interaction: discord.Interaction):
+        """Phase 3.8: cross-reference online CivMC players with the registry."""
+        await interaction.response.defer()
+
+        try:
+            s = await self._fetch_status()
+        except Exception as e:
+            logger.error(f"Server online check failed: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ Could not reach the status API. Please try again in a moment.",
+                ephemeral=True,
+            )
+            return
+
+        if not s["online"]:
+            await interaction.followup.send("🔴 **CivMC** is offline right now.")
+            return
+
+        online_list = s["players_list"]
+        if not online_list:
+            await interaction.followup.send(
+                f"🟢 CivMC is online ({s['players_online']}/{s['players_max']}) but no players are currently online."
+            )
+            return
+
+        # Cross-reference: which online players are registered Lambat citizens?
+        # CITEXT means the ILIKE match is case-insensitive at the DB level.
+        online_lower = [p.lower() for p in online_list if p]
+        if not online_lower:
+            await interaction.followup.send(
+                f"🟢 CivMC is online ({s['players_online']}/{s['players_max']})."
+            )
+            return
+
+        # Build a parameterized IN-clause ($1, $2, ...) for the registry lookup.
+        placeholders = ", ".join(f"${i + 1}" for i in range(len(online_lower)))
+        citizen_rows = await db.execute_query(
+            f"SELECT ign, settlement FROM citizens WHERE LOWER(ign) IN ({placeholders})",
+            tuple(online_lower),
+            fetch_all=True,
+        )
+
+        citizens_online, non_citizens_online = _partition_citizens(online_list, citizen_rows)
+
+        embed = _build_online_embed(
+            s["players_online"],
+            s["players_max"],
+            citizens_online,
+            non_citizens_online,
+        )
+        await interaction.followup.send(embed=embed)
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers (testable without Discord / DB)
+# ---------------------------------------------------------------------------
+
+
+def _partition_citizens(
+    online_list: list[str], citizen_rows: list[dict] | None
+) -> tuple[list[tuple[str, str]], list[str]]:
+    """Split the online player list into (citizen, settlement) pairs and non-citizens.
+
+    Case-insensitive match: mcsrvstat returns exact-case IGNs, the registry
+    uses CITEXT so "SteveB" and "steveb" are the same citizen.
+    """
+    citizen_map: dict[str, str] = {}
+    if citizen_rows:
+        for row in citizen_rows:
+            citizen_map[row["ign"].lower()] = row["settlement"]
+
+    citizens: list[tuple[str, str]] = []
+    non_citizens: list[str] = []
+    for player in online_list:
+        if not player:
+            continue
+        settlement = citizen_map.get(player.lower())
+        if settlement is not None:
+            citizens.append((player, settlement))
+        else:
+            non_citizens.append(player)
+
+    # Sort citizens alphabetically by IGN for stable display.
+    citizens.sort(key=lambda c: c[0].lower())
+    non_citizens.sort(key=str.lower)
+    return citizens, non_citizens
+
+
+def _build_online_embed(
+    players_online: int,
+    players_max: int,
+    citizens_online: list[tuple[str, str]],
+    non_citizens_online: list[str],
+) -> discord.Embed:
+    """Build the embed for /server online."""
+    total_online = players_online
+    lambat_count = len(citizens_online)
+    other_count = len(non_citizens_online)
+
+    embed = discord.Embed(
+        title="🟢 CivMC Online Players",
+        description=f"**{total_online}/{players_max}** players online — **{lambat_count}** Lambat citizen(s).",
+        color=0x3BAD4C,
+    )
+
+    if citizens_online:
+        lines = [f"• **{ign}** — {settlement}" for ign, settlement in citizens_online[:25]]
+        value = "\n".join(lines)
+        if len(citizens_online) > 25:
+            value += f"\n*...and {len(citizens_online) - 25} more*"
+        embed.add_field(
+            name=f"🇵🇭 Lambat Citizens ({lambat_count})",
+            value=value[:1024],
+            inline=False,
+        )
+
+    if non_citizens_online:
+        # Show non-citizens in chunks of 25 (Discord field value cap is 1024 chars).
+        lines = [f"• {ign}" for ign in non_citizens_online[:25]]
+        value = "\n".join(lines)
+        if len(non_citizens_online) > 25:
+            value += f"\n*...and {len(non_citizens_online) - 25} more*"
+        embed.add_field(
+            name=f"🌐 Other Players ({other_count})",
+            value=value[:1024],
+            inline=False,
+        )
+
+    embed.set_footer(text="Data: mcsrvstat.us • Cross-referenced with Lambat registry")
+    return embed
 
 
 async def setup(bot):

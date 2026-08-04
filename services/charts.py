@@ -190,3 +190,69 @@ def render_population_trends(
     _close_all([fig])
     buf.seek(0)
     return buf.getvalue()
+
+
+def render_activity_series(
+    title: str,
+    dates: list,
+    totals: list[int],
+    actives: list[int] | None = None,
+) -> bytes | None:
+    """Render a single-panel activity time-series chart (Phase 3.5).
+
+    Args:
+        title: Chart title (e.g. "Florraine — Population & Activity").
+        dates: X-axis values (snapshot_date or datetime).
+        totals: Total population at each point.
+        actives: Optional active citizen count at each point. When provided,
+            a second line + shaded area is drawn showing active vs inactive.
+
+    Returns:
+        PNG bytes, or None if there's not enough data (fewer than 1 point).
+    """
+    if not dates or not totals:
+        return None
+
+    _apply_dark_style()
+    fig, ax1 = plt.subplots(1, 1, figsize=(10, 6))
+
+    # Total population line.
+    ax1.plot(
+        dates, totals, color=COLOR_TOTAL, marker="o", linewidth=2.5, markersize=6, label="Total"
+    )
+    ax1.fill_between(dates, totals, alpha=0.15, color=COLOR_TOTAL)
+    ax1.set_title(title)
+    ax1.set_ylabel("Citizens")
+    ax1.xaxis.set_major_formatter(DateFormatter("%b %Y"))
+    if len(dates) > 1:
+        ax1.set_xlim(dates[0], dates[-1])
+
+    # Active vs inactive stacked area (optional second series).
+    if actives and len(actives) == len(totals):
+        inactives = [t - a for t, a in zip(totals, actives, strict=True)]
+        ax1.stackplot(
+            dates,
+            actives,
+            inactives,
+            labels=["Active", "Inactive"],
+            colors=[COLOR_ACTIVE, COLOR_INACTIVE],
+            alpha=0.3,
+        )
+        ax1.plot(
+            dates,
+            actives,
+            color=COLOR_ACTIVE,
+            linewidth=2,
+            marker="s",
+            markersize=4,
+            label="Active",
+        )
+        ax1.legend(loc="upper left", framealpha=0.8)
+
+    fig.tight_layout(pad=2.0)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, facecolor=COLOR_BG)
+    _close_all([fig])
+    buf.seek(0)
+    return buf.getvalue()
