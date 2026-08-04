@@ -166,7 +166,7 @@ data/
 
 # Logs
 *.log
-pavia_bot.log
+lambat_bot.log
 
 # Backups
 backups/

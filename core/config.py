@@ -70,6 +70,32 @@ class Config:
     # Paths
     BACKUP_DIR = os.getenv("BACKUP_DIR", "backups")
 
+    # --- Backups: off-site sink + retention (Phase 0 hardening) ---
+    # Where backups are uploaded in addition to the local BACKUP_DIR copy.
+    # One of: local, s3, gcs. "local" keeps the legacy behaviour (disk only).
+    # S3 requires `pip install boto3` (creds via the standard AWS credential
+    # chain — env vars, profile, or IAM role). GCS requires
+    # `pip install google-cloud-storage` (creds via GOOGLE_APPLICATION_CREDENTIALS).
+    BACKUP_SINK = os.getenv("BACKUP_SINK", "local").strip().lower()
+    BACKUP_S3_BUCKET = os.getenv("BACKUP_S3_BUCKET", "").strip()
+    BACKUP_S3_PREFIX = os.getenv("BACKUP_S3_PREFIX", "").strip()
+    BACKUP_GCS_BUCKET = os.getenv("BACKUP_GCS_BUCKET", "").strip()
+    BACKUP_GCS_PREFIX = os.getenv("BACKUP_GCS_PREFIX", "").strip()
+    # How many "auto" (daily) backups to keep on disk. Older auto backups are
+    # pruned after each create. "manual" and "pre_restore" backups are NEVER
+    # pruned. Monthly backups (note="monthly", generated on the 1st) are also
+    # preserved.
+    BACKUP_RETENTION_DAILY = int(os.getenv("BACKUP_RETENTION_DAILY", 30))
+
+    # --- Optional ---
+    # HTTP proxy URL for outbound requests (blank/None = direct). Routed
+    # through Config rather than read ad-hoc in main.py so it's validated
+    # and consistent with the rest of the configuration.
+    PROXY_URL = (os.getenv("PROXY_URL", "") or "").strip() or None
+    # Port for the keep-alive/health server (Render/Railway liveness + /healthz
+    # and /metrics). Render injects PORT automatically.
+    PORT = int(os.getenv("PORT", 10000))
+
     @classmethod
     def validate_config(cls):
         """Validate that all required configuration is set."""
@@ -103,6 +129,18 @@ class Config:
         # free-tier rate limit of ~5 req/min).
         if cls.UPTIME_CHECK_INTERVAL < 60:
             raise ValueError("UPTIME_CHECK_INTERVAL must be at least 60 seconds (mcsrvstat.us rate limit).")
+
+        # Validate backup sink configuration.
+        if cls.BACKUP_SINK not in ("local", "s3", "gcs"):
+            raise ValueError(
+                f"BACKUP_SINK must be one of: local, s3, gcs (got {cls.BACKUP_SINK!r})."
+            )
+        if cls.BACKUP_SINK == "s3" and not cls.BACKUP_S3_BUCKET:
+            raise ValueError("BACKUP_SINK=s3 requires BACKUP_S3_BUCKET to be set.")
+        if cls.BACKUP_SINK == "gcs" and not cls.BACKUP_GCS_BUCKET:
+            raise ValueError("BACKUP_SINK=gcs requires BACKUP_GCS_BUCKET to be set.")
+        if cls.BACKUP_RETENTION_DAILY < 1:
+            raise ValueError("BACKUP_RETENTION_DAILY must be at least 1.")
 
         logger.info("Configuration validated successfully.")
 

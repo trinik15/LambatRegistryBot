@@ -5,6 +5,7 @@ import subprocess
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from core.config import Config
+from services.backup_sinks import upload_to_sink
 import logging
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,22 @@ async def create_backup(backup_type="manual", note=""):
             raise
 
     await asyncio.to_thread(_sync_dump)
+
+    # Off-site upload is best-effort: the local copy is the authoritative safety
+    # net, so a sink failure must NOT fail the whole backup. upload_to_sink
+    # logs loudly on failure and returns None; the .meta is uploaded too so the
+    # off-site copy is self-describing.
+    await upload_to_sink(backup_path)
+    await upload_to_sink(backup_path + ".meta")
+
+    # Prune old auto backups so the disk doesn't fill forever. Manual and
+    # pre_restore backups are never pruned; monthly backups are preserved.
+    try:
+        await prune_backups(Config.BACKUP_RETENTION_DAILY)
+    except Exception as e:
+        # Pruning must never break a successful backup.
+        logger.warning(f"Backup retention pruning failed (non-fatal): {e}", exc_info=True)
+
     return filename
 
 async def list_backups():
@@ -147,6 +164,54 @@ async def list_backups():
     backups.sort(key=lambda x: x["created"], reverse=True)
     logger.info(f"Returning {len(backups)} backups")
     return backups
+
+
+async def prune_backups(keep_daily: int = 30):
+    """Delete old ``auto`` backups beyond ``keep_daily``, newest-first.
+
+    Rules (so we never lose data an operator would want):
+      * ``auto`` backups with note == "monthly" (generated on the 1st) are
+        NEVER pruned — they're the long-term trend history.
+      * ``manual`` and ``pre_restore`` backups are NEVER pruned.
+      * All other ``auto`` backups are kept newest-first up to ``keep_daily``;
+        the rest are deleted (both the ``.sql`` and the ``.sql.meta``).
+
+    ``list_backups`` already returns newest-first, so the slice is trivial.
+    """
+    if keep_daily < 1:
+        return
+
+    backups = await list_backups()
+    if not backups:
+        return
+
+    # Candidate auto backups that are NOT monthly. (list_backups parses the
+    # .meta `note` field; "monthly" is set by main.py on the 1st of the month.)
+    candidates = [
+        b for b in backups
+        if b.get("type") == "auto" and b.get("note") != "monthly"
+    ]
+    # newest-first already; keep the first `keep_daily`, prune the rest.
+    to_prune = candidates[keep_daily:]
+    if not to_prune:
+        return
+
+    pruned = 0
+    for b in to_prune:
+        for suffix in ("", ".meta"):
+            path = _safe_backup_path(b["filename"] + suffix)
+            try:
+                os.remove(path)
+                pruned += 1
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning(f"Could not prune {path}: {e}")
+    logger.info(
+        f"Pruned {len(to_prune)} old auto backup(s) "
+        f"(retention={keep_daily} daily, monthly/manual/pre_restore preserved); "
+        f"{pruned} file(s) removed."
+    )
 
 async def restore_backup(filename):
     """Ripristina il database da un file di backup SQL.

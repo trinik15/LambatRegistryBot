@@ -178,7 +178,7 @@ a companion `.sql.meta` file with the type, note, and timestamp.
 ## Architecture
 
 ```
-main.py                  — Bot entry point, setup_hook, /sync command, error handler
+main.py                  — Bot entry point (LambatRegistryBot), setup_hook, /sync command, error handler
 core/
   config.py              — Environment-based configuration (validated on import)
   database.py            — asyncpg connection pool + idempotent schema migrations
@@ -187,8 +187,10 @@ api/
   civinfo_api.py         — CivInfo activity client (per-entry TTL cache, auth-broken
                            graceful degradation)
 services/
-  backup.py              — pg_dump/psql wrapper (path-traversal-safe, timeout-protected)
-  role_manager.py        — Discord role assignment/removal (with Forbidden handling)
+  backup.py              — pg_dump/psql wrapper (path-traversal-safe, timeout-protected,
+                           off-site sink upload + retention pruning)
+  backup_sinks.py        — Pluggable off-site backup destinations (local / S3 / GCS)
+  role_manager.py        — Discord role assignment/removal (case-insensitive, Forbidden handling)
   charts.py              — matplotlib (Agg) chart rendering for /report trends
 tasks/
   activity_monitor.py    — Daily activity check + monthly census report + snapshots
@@ -201,7 +203,7 @@ cogs/
   data.py                — /data backup, list_backups, restore
   help.py                — /help command
 web/
-  http_keepalive.py      — Tiny HTTP server for host liveness checks
+  health.py              — Keep-alive + /healthz (honest liveness) + /metrics (Prometheus)
 utils.py                 — PaginationView, date parsing/formatting helpers
 ```
 

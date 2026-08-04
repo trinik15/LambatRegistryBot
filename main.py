@@ -11,30 +11,29 @@ from core import database as db
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
 from tasks.uptime_monitor import UptimeMonitor
-from web.http_keepalive import start_http_server
+from web.health import start_health_server
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('pavia_bot.log'),
+        logging.FileHandler('lambat_bot.log'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 
-class PaviaBot(commands.Bot):
+class LambatRegistryBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.members = True
         # message_content is NOT needed — this bot is slash-command-only.
         # Keeping it off follows the principle of least privilege.
-        proxy_url = os.getenv("PROXY_URL")
         super().__init__(
             command_prefix="!",
             intents=intents,
-            proxy=proxy_url
+            proxy=Config.PROXY_URL
         )
         self.http_session = None
         self.activity_monitor = None
@@ -89,13 +88,15 @@ class PaviaBot(commands.Bot):
         except Exception as e:
             logger.error(f"Failed to start uptime_monitor: {e}", exc_info=True)
 
-        # 3d. Start the HTTP keep-alive server so the host platform (e.g. Render)
-        #     does not mark the service as idle and shut it down.
+        # 3d. Start the HTTP keep-alive + health server so the host platform
+        #     (e.g. Render) does not mark the service as idle and shut it down.
+        #     The same server exposes /healthz (honest liveness: gateway + DB)
+        #     and /metrics (basic Prometheus text). See web/health.py.
         try:
-            start_http_server()
-            logger.info(f"HTTP keep-alive server started on port {os.environ.get('PORT', 10000)}.")
+            start_health_server(self)
+            logger.info(f"Health/keep-alive server started on port {os.environ.get('PORT', 10000)}.")
         except Exception as e:
-            logger.warning(f"Failed to start HTTP keep-alive server: {e}")
+            logger.warning(f"Failed to start health/keep-alive server: {e}")
 
         # 4. Load all cogs
         for filename in os.listdir("cogs"):
@@ -167,8 +168,12 @@ class PaviaBot(commands.Bot):
     async def daily_backup(self):
         await self.wait_until_ready()
         try:
-            await backup.create_backup("auto", "daily_scheduled")
-            logger.info("Daily backup created successfully.")
+            # Tag the 1st-of-month backup as "monthly" so prune_backups preserves
+            # it as long-term history (it's never auto-deleted by retention).
+            now = datetime.now(timezone.utc)
+            note = "monthly" if now.day == 1 else "daily_scheduled"
+            await backup.create_backup("auto", note)
+            logger.info(f"Daily backup created successfully (note={note}).")
         except Exception as e:
             logger.error(f"Failed to create daily backup: {e}", exc_info=True)
 
@@ -218,7 +223,7 @@ class PaviaBot(commands.Bot):
 
 
 async def main():
-    bot = PaviaBot()
+    bot = LambatRegistryBot()
     try:
         await bot.start(Config.DISCORD_TOKEN)
     except KeyboardInterrupt:
