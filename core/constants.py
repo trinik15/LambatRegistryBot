@@ -1,6 +1,33 @@
 # constants.py
 
 
+# ======================
+# Settlement → Duchy seed mapping (Phase 2.3)
+# ======================
+# Historical source of truth for which duchy each settlement belongs to. Used
+# ONLY as the migration back-fill seed for the new ``settlements.duchy`` column
+# (and as a fallback if the DB column is somehow NULL). Once the column is
+# populated, the DB is authoritative — this dict must not be read at runtime
+# by any code path other than the migration / a defensive fallback.
+SETTLEMENT_TO_DUCHY = {
+    "New September": "Lambat City",
+    "Pioneer": "Lambat City",
+    "Sunnebourg": "Lambat City",
+    "Poblacion": "Lambat City",
+    "Timberbourg": "Florraine",
+    "Immerheim": "Florraine",
+    "Gulash": "Florraine",
+    "Bazariskes": "Valle Occidental",
+    "Mt. Abedul": "Valle Occidental",
+    "Silenya": "Valle Occidental",
+    "Heavensroost": "Valle Occidental",
+    "Girasol": "Valle Occidental",
+    "Tierra del Cabo": "Capeland",
+    "Margaritaville": "Margaritaville",
+    "Pampang": "San Canela",
+}
+
+
 class Colors:
     """Color codes for Discord embeds."""
 

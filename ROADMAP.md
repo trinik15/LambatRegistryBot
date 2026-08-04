@@ -208,20 +208,38 @@ board could be built off `/metrics`.
 
 ---
 
-### Phase 2 — Data-model normalization & auditability
+### Phase 2 — Data-model normalization & auditability  ✅ COMPLETE
 
 **Goal:** make the registry queryable and accountable.
 
-| ID | Task | Effort | Touches |
-|---|---|---|---|
-| **2.1** | **Audit log table + emitter.** New `audit_log(id, ts, actor_discord_id, action, target_ign, details JSONB)` table. A `services/audit.py` emits on every citizen add/update/remove and settlement add/remove. Add `/audit search` (Council) with filters by actor, action, target, date range. Also post a summary to an optional `AUDIT_CHANNEL_ID`. | L | new `services/audit.py`, `cogs/citizen.py`, `cogs/settlement.py`, `core/database.py`, new `cogs/audit.py` |
-| **2.2** | **Normalize `recruiter_ids` into a `recruiters` junction table.** `recruiters(ign FK→citizens, recruiter_discord_id, recruited_at)`. Migration back-fills from the comma-split. Enables `/citizen recruited-by @user` and recruiter leaderboard in `/report`. | M | `core/database.py`, `cogs/citizen.py`, `cogs/reports.py` |
-| **2.3** | **Promote `SETTLEMENT_TO_DUCHY` to a DB column.** Add `duchy TEXT` to `settlements` (nullable for the migration, then back-filled from the existing dict, then `NOT NULL`). `/settlement add` takes a `duchy` param; `/settlement list` groups by duchy. The monthly report reads from the DB instead of the hardcoded dict. | M | `core/database.py`, `cogs/settlement.py`, `tasks/activity_monitor.py` |
-| **2.4** | **Configurable emoji mapping in DB.** Move `Emojis.PROVINCE` / `Emojis.DISTRICT` into a `guild_emojis(key TEXT, emoji_str TEXT)` table seeded from the current constants, with `/emoji set` (Council) for runtime updates. Decouples reports from one guild's emoji IDs. | M | `core/constants.py` → `core/emojis.py` (DB-backed), new `cogs/emoji.py` |
-| **2.5** | **Role reconciliation task.** Weekly `tasks.loop` that, for every citizen, checks their Discord member still has the citizen/settler/settlement roles and the guest role is absent; logs discrepancies to the audit channel. Auto-fix is opt-in (`ROLE_SYNC_AUTO=true`). | M | new `tasks/role_sync.py` |
+| ID | Task | Effort | Touches | Status |
+|---|---|---|---|---|
+| **2.1** | **Audit log table + emitter.** New `audit_log(id BIGSERIAL, ts TIMESTAMPTZ, actor_discord_id, action, target_ign, details JSONB)` table. A `services/audit.py` emits on every citizen add/update/remove and settlement add/remove. Add `/audit search` (Council) with filters by actor, action, target, date range. Also post a summary to an optional `AUDIT_CHANNEL_ID`. | L | new `services/audit.py`, `cogs/citizen.py`, `cogs/settlement.py`, `core/database.py`, new `cogs/audit.py` | ✅ |
+| **2.2** | **Normalize `recruiter_ids` into a `recruiters` junction table.** `recruiters(ign FK→citizens, recruiter_discord_id, recruited_at)`. Migration back-fills from the comma-split. Enables `/citizen recruited-by @user` and recruiter leaderboard in `/report`. | M | `core/database.py`, `cogs/citizen.py`, `cogs/reports.py`, new `services/recruiters.py` | ✅ |
+| **2.3** | **Promote `SETTLEMENT_TO_DUCHY` to a DB column.** Add `duchy TEXT NOT NULL` to `settlements` (nullable for the migration, then back-filled from the existing dict, then `NOT NULL`). `/settlement add` takes a `duchy` param; `/settlement list` groups by duchy. The monthly report reads from the DB instead of the hardcoded dict. | M | `core/database.py`, `cogs/settlement.py`, `tasks/activity_monitor.py`, `core/constants.py` | ✅ |
+| **2.4** | **Configurable emoji mapping in DB.** Move `Emojis.PROVINCE` / `Emojis.DISTRICT` into a `guild_emojis(key TEXT, emoji_str TEXT)` table seeded from the current constants, with `/emoji set` (Council) for runtime updates. Decouples reports from one guild's emoji IDs. | M | new `core/emojis.py` (DB-backed), new `cogs/emoji.py` | ✅ |
+| **2.5** | **Role reconciliation task.** Weekly `tasks.loop` that, for every citizen, checks their Discord member still has the citizen/settler/settlement roles and the guest role is absent; logs discrepancies to the audit channel. Auto-fix is opt-in (`ROLE_SYNC_AUTO=true`). | M | new `tasks/role_sync.py`, `main.py`, `core/config.py` | ✅ |
 
 **Exit criteria:** every registry mutation is auditable; recruiters are first-class
-queryable entities; duchies and emojis are data, not code.
+queryable entities; duchies and emojis are data, not code. — **MET**
+
+**What shipped:**
+- `audit_log` table with indexes on ts/actor/action/target; transaction-aware
+  `audit.emit()` (atomic with the mutation); best-effort Discord channel mirror
+  via `AUDIT_CHANNEL_ID`; `/audit search` with actor/action/target/date filters.
+- `recruiters` junction table back-filled from `citizens.recruiter_ids`;
+  dual-write (junction + legacy cache) so existing reads keep working;
+  `/citizen recruited-by` and `/report recruiters` leaderboard.
+- `settlements.duchy TEXT NOT NULL`, back-filled from the seed dict;
+  `/settlement add` requires a duchy; `/settlement list` groups by duchy;
+  monthly report JOINs settlements instead of using the hardcoded dict.
+- `guild_emojis` table seeded from `Emojis.PROVINCE`/`DISTRICT`; `core/emojis.py`
+  with in-process cache; `/emoji set` + `/emoji list`; activity_monitor uses
+  DB-backed lookups.
+- `tasks/role_sync.py` weekly loop with `detect_role_issues()` pure helper;
+  `ROLE_SYNC_AUTO` opt-in auto-fix; discrepancies logged to audit_log + channel.
+- 55 new tests (audit vocabulary/summary/json, emoji validation/cache, recruiter
+  cleaning, role-sync discrepancy detection). Total: 109 passing.
 
 ---
 

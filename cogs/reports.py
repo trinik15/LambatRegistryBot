@@ -12,6 +12,7 @@ import utils
 from api import civinfo_api
 from core import database as db
 from core.config import Config
+from services import recruiters as recruiters_svc
 from tasks.activity_monitor import _fetch_activities
 
 logger = logging.getLogger(__name__)
@@ -427,6 +428,45 @@ class ReportsCog(commands.Cog):
             color=0x43B581,
         )
         await interaction.followup.send(embed=embed, file=file)
+
+    @reports_group.command(
+        name="recruiters", description="Show the top recruiters by number of citizens recruited"
+    )
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "report_recruiters")
+    )
+    async def report_recruiters(self, interaction: discord.Interaction):
+        if not self.has_view_access(interaction):
+            return await interaction.response.send_message(
+                "❌ You don't have permission to view reports.", ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        # Phase 2.2: query the recruiters junction table (the normalised source
+        # of truth) rather than parsing citizens.recruiter_ids in Python.
+        top = await recruiters_svc.leaderboard(limit=15)
+        if not top:
+            await interaction.followup.send("No recruiter data available yet.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="🎯 Top Recruiters",
+            description=f"Top {len(top)} recruiters by number of citizens brought in.",
+            color=0x7289DA,
+        )
+        lines = []
+        for idx, row in enumerate(top, start=1):
+            rid = row["recruiter_discord_id"]
+            cnt = row["cnt"]
+            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"{idx}.")
+            lines.append(f"{medal} <@{rid}> — **{cnt}** citizen(s)")
+        value = "\n".join(lines)
+        if len(value) > 1020:
+            value = value[:1017] + "..."
+        embed.add_field(name="Leaderboard", value=value, inline=False)
+        embed.set_footer(text="Sourced from the recruiters junction table")
+        await interaction.followup.send(embed=embed)
 
 
 async def setup(bot):

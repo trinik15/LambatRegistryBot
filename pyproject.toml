@@ -82,7 +82,7 @@ indent-style = "space"
 # is the Phase 2 aspiration once their signatures get annotated.
 # -----------------------------------------------------------------------------
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true
@@ -101,6 +101,14 @@ files = ["core", "services", "api", "tasks", "web", "utils.py", "main.py"]
 [[tool.mypy.overrides]]
 module = ["cogs.*"]
 disallow_untyped_defs = false
+
+# numpy's bundled stubs (pulled in transitively via matplotlib) use Python 3.12
+# `type` statement syntax that mypy in 3.11-target mode can't parse. This is a
+# numpy-stub issue, not ours — ignore errors inside numpy itself so our own
+# type-checking isn't blocked by a third-party stub.
+[[tool.mypy.overrides]]
+module = ["numpy.*"]
+ignore_errors = true
 
 # -----------------------------------------------------------------------------
 # Pytest

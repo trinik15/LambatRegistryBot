@@ -7,6 +7,7 @@ from discord.ext import tasks
 
 from api import civinfo_api
 from core import database as db
+from core import emojis as emoji_db
 from core.config import Config
 from core.constants import Emojis
 
@@ -35,24 +36,11 @@ async def _fetch_activities(igns, session):
     return dict(results)
 
 
-# Mappa distretto -> provincia (duchy)
-SETTLEMENT_TO_DUCHY = {
-    "New September": "Lambat City",
-    "Pioneer": "Lambat City",
-    "Sunnebourg": "Lambat City",
-    "Poblacion": "Lambat City",
-    "Timberbourg": "Florraine",
-    "Immerheim": "Florraine",
-    "Gulash": "Florraine",
-    "Bazariskes": "Valle Occidental",
-    "Mt. Abedul": "Valle Occidental",
-    "Silenya": "Valle Occidental",
-    "Heavensroost": "Valle Occidental",
-    "Girasol": "Valle Occidental",
-    "Tierra del Cabo": "Capeland",
-    "Margaritaville": "Margaritaville",
-    "Pampang": "San Canela",
-}
+# NOTE: SETTLEMENT_TO_DUCHY was a hardcoded dict mapping each settlement to
+# its duchy. As of Phase 2.3 this mapping lives in the ``settlements.duchy``
+# DB column (seeded from core.constants.SETTLEMENT_TO_DUCHY during migration).
+# The monthly report now JOINs settlements to read duchy directly — no more
+# hardcoded mapping in this file.
 
 
 class ActivityMonitor:
@@ -118,8 +106,12 @@ class ActivityMonitor:
         last_month_date = last_month.date()
         month_name = last_month.strftime("%B %Y")  # Nome del mese passato (es. "February 2026")
 
+        # Phase 2.3: JOIN settlements to read duchy from the DB instead of the
+        # hardcoded SETTLEMENT_TO_DUCHY dict.
         citizens = await db.execute_query(
-            "SELECT ign, settlement, join_date FROM citizens", fetch_all=True
+            "SELECT c.ign, c.settlement, c.join_date, s.duchy "
+            "FROM citizens c JOIN settlements s ON c.settlement = s.name",
+            fetch_all=True,
         )
         if not citizens:
             logger.warning("No citizens to generate monthly report")
@@ -141,12 +133,16 @@ class ActivityMonitor:
         # report honestly instead.
         auth_broken = civinfo_api.is_auth_broken()
 
+        # Build a district→duchy map for the snapshot save loop below (which
+        # iterates district_totals, not citizens).
+        district_to_duchy: dict[str, str] = {c["settlement"]: c["duchy"] for c in citizens}
+
         for c in citizens:
             _, emoji, _, _ = activities.get(c["ign"], ("error", "⚪", None, "Error"))
             is_active = emoji == "🟢"
 
             district = c["settlement"]
-            duchy = SETTLEMENT_TO_DUCHY.get(district, "Unknown")
+            duchy = c["duchy"]
 
             province_totals[duchy] = province_totals.get(duchy, 0) + 1
             if is_active:
@@ -236,7 +232,7 @@ class ActivityMonitor:
         # POPULATION PER PROVINCE/TERRITORY
         lines.append(f"**{Emojis.LAMBAT} POPULATION PER PROVINCE/TERRITORY, RANKED**\n")
         for duchy, total in sorted(province_totals.items(), key=lambda x: x[1], reverse=True):
-            emoji = Emojis.PROVINCE.get(duchy, "")
+            emoji = await emoji_db.get_province(duchy)
             old = old_province.get(duchy, (0, 0))[0]
             pct, arrow = calc_change(old, total)
             if pct is None:
@@ -249,7 +245,7 @@ class ActivityMonitor:
         # ACTIVE POPULATION PER PROVINCE
         lines.append(f"{Emojis.LAMBAT_CHAD} **ACTIVE POPULATION PER PROVINCE/TERRITORY**\n")
         for duchy, active in sorted(province_active.items(), key=lambda x: x[1], reverse=True):
-            emoji = Emojis.PROVINCE.get(duchy, "")
+            emoji = await emoji_db.get_province(duchy)
             old_active_val = old_province.get(duchy, (0, 0))[1]
             pct, arrow = calc_change(old_active_val, active)
             if pct is None:
@@ -262,7 +258,7 @@ class ActivityMonitor:
         # POPULATION PER DISTRICT
         lines.append("**🏙️ POPULATION PER DISTRICT**\n")
         for district, total in sorted(district_totals.items(), key=lambda x: x[1], reverse=True):
-            emoji = Emojis.DISTRICT.get(district, "")
+            emoji = await emoji_db.get_district(district)
             old = old_district.get(district, (0, 0))[0]
             pct, arrow = calc_change(old, total)
             if pct is None:
@@ -275,7 +271,7 @@ class ActivityMonitor:
         # ACTIVE POPULATION PER DISTRICT
         lines.append(f"{Emojis.LAMBATAN_SALUDO} **ACTIVE POPULATION PER DISTRICT**\n")
         for district, active in sorted(district_active.items(), key=lambda x: x[1], reverse=True):
-            emoji = Emojis.DISTRICT.get(district, "")
+            emoji = await emoji_db.get_district(district)
             old_active_val = old_district.get(district, (0, 0))[1]
             pct, arrow = calc_change(old_active_val, active)
             if pct is None:
@@ -350,7 +346,7 @@ class ActivityMonitor:
         for duchy, total in province_totals.items():
             snapshot_rows.append((snapshot_date, duchy, None, total, province_active.get(duchy, 0)))
         for district, total in district_totals.items():
-            duchy = SETTLEMENT_TO_DUCHY.get(district, "Unknown")
+            duchy = district_to_duchy.get(district, "Unknown")
             snapshot_rows.append(
                 (snapshot_date, duchy, district, total, district_active.get(district, 0))
             )

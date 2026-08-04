@@ -73,6 +73,29 @@ class Config:
     # How often (seconds) to poll the server status. Default 5 min.
     UPTIME_CHECK_INTERVAL = int(os.getenv("UPTIME_CHECK_INTERVAL", 300))
 
+    # --- Audit log (Phase 2.1) ---
+    # Channel that receives a concise embed for every registry mutation (citizen
+    # add/update/remove, settlement add/remove, role-sync discrepancies). This
+    # is a read-only mirror of the audit_log table for the wider council.
+    # 0 = disabled (mutations are still recorded in the DB, just not posted).
+    AUDIT_CHANNEL_ID = int(os.getenv("AUDIT_CHANNEL_ID", 0))
+
+    # --- Role reconciliation (Phase 2.5) ---
+    # Weekly task that checks every citizen's Discord member still holds the
+    # citizen/settler/settlement roles and lacks the guest role. Discrepancies
+    # are logged to the audit channel (and the audit_log table). When
+    # ROLE_SYNC_AUTO=true the bot also re-applies the correct roles; otherwise
+    # it only reports.
+    ROLE_SYNC_AUTO = os.getenv("ROLE_SYNC_AUTO", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    # Day-of-week (0=Mon … 6=Sun) and hour (UTC) to run the weekly check.
+    ROLE_SYNC_WEEKLY_DAY = int(os.getenv("ROLE_SYNC_WEEKLY_DAY", 0))  # Monday
+    ROLE_SYNC_WEEKLY_HOUR = int(os.getenv("ROLE_SYNC_WEEKLY_HOUR", 3))  # 03:00 UTC
+
     # Paths
     BACKUP_DIR = os.getenv("BACKUP_DIR", "backups")
 
@@ -161,6 +184,12 @@ class Config:
             raise ValueError("BACKUP_SINK=gcs requires BACKUP_GCS_BUCKET to be set.")
         if cls.BACKUP_RETENTION_DAILY < 1:
             raise ValueError("BACKUP_RETENTION_DAILY must be at least 1.")
+
+        # Validate role-sync schedule bounds.
+        if not 0 <= cls.ROLE_SYNC_WEEKLY_DAY <= 6:
+            raise ValueError("ROLE_SYNC_WEEKLY_DAY must be 0-6 (Mon-Sun).")
+        if not 0 <= cls.ROLE_SYNC_WEEKLY_HOUR <= 23:
+            raise ValueError("ROLE_SYNC_WEEKLY_HOUR must be 0-23 (UTC).")
 
         logger.info("Configuration validated successfully.")
 

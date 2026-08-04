@@ -12,6 +12,7 @@ from core.config import Config
 from core.logging_config import setup_logging
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
+from tasks.role_sync import RoleSyncTask
 from tasks.uptime_monitor import UptimeMonitor
 from web.health import start_health_server
 
@@ -32,6 +33,7 @@ class LambatRegistryBot(commands.Bot):
         self.http_session = None
         self.activity_monitor = None
         self.uptime_monitor = None
+        self.role_sync = None  # Phase 2.5: weekly role reconciliation task
 
     async def setup_hook(self):
         """
@@ -80,6 +82,16 @@ class LambatRegistryBot(commands.Bot):
             self.uptime_monitor.start()
         except Exception as e:
             logger.error(f"Failed to start uptime_monitor: {e}", exc_info=True)
+
+        # 3c-bis. Start the weekly role reconciliation task (Phase 2.5).
+        #        Checks every citizen still holds the correct Discord roles;
+        #        logs discrepancies to the audit channel + audit_log table.
+        #        Auto-fixes only when ROLE_SYNC_AUTO=true.
+        try:
+            self.role_sync = RoleSyncTask(self)
+            self.role_sync.start()
+        except Exception as e:
+            logger.error(f"Failed to start role_sync task: {e}", exc_info=True)
 
         # 3d. Start the HTTP keep-alive + health server so the host platform
         #     (e.g. Render) does not mark the service as idle and shut it down.
@@ -238,6 +250,10 @@ class LambatRegistryBot(commands.Bot):
         # Stop the uptime monitor if it's running
         if self.uptime_monitor:
             self.uptime_monitor.stop()
+
+        # Stop the weekly role reconciliation task if running (Phase 2.5).
+        if self.role_sync:
+            self.role_sync.stop()
 
         # Close HTTP session
         if self.http_session and not self.http_session.closed:
