@@ -245,6 +245,155 @@ class SettlementCog(commands.Cog):
         embed.set_footer(text=f"Total: {len(rows)} settlements")
         await interaction.response.send_message(embed=embed)
 
+    @settlement_group.command(name="info", description="Show a dashboard for a single settlement")
+    @app_commands.autocomplete(name=settlement_autocomplete)
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_MEDIUM, key=lambda i: (i.user.id, "settlement_info")
+    )
+    async def settlement_info(self, interaction: discord.Interaction, name: str):
+        """Phase 3.3: single-settlement dashboard embed.
+
+        Shows total citizens, activity breakdown, growth since last snapshot,
+        top recruiters, and a paginated member list.
+        """
+        if not self.has_full_access(interaction) and interaction.user.id != Config.OWNER_ID:
+            # Settlement info is council-only (contains recruiter + activity data).
+            return await interaction.response.send_message(
+                "❌ You need the Council role to use this command.", ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        # 1. Settlement exists?
+        settlement = await db.execute_query(
+            "SELECT name, duchy FROM settlements WHERE name = $1", (name,), fetch_one=True
+        )
+        if not settlement:
+            await interaction.followup.send(
+                f"❌ Settlement `{name}` does not exist.", ephemeral=True
+            )
+            return
+
+        # 2. Citizens in this settlement.
+        citizens = await db.execute_query(
+            "SELECT ign, discord_id, join_date FROM citizens WHERE settlement = $1 ORDER BY ign",
+            (name,),
+            fetch_all=True,
+        )
+        total = len(citizens) if citizens else 0
+
+        # 3. Activity breakdown (batch fetch via the existing CivInfo helper).
+        from tasks.activity_monitor import _fetch_activities
+
+        activities: dict = {}
+        if citizens:
+            igns = [c["ign"] for c in citizens]
+            activities = await _fetch_activities(igns, self.bot.http_session)
+
+        active_count = sum(
+            1 for d in activities.values() if d[1] == "🟢"
+        )  # d = (status, emoji, last_login, status_text)
+        semi_count = sum(1 for d in activities.values() if d[1] == "🟠")
+        inactive_count = sum(1 for d in activities.values() if d[1] == "🔴")
+        active_rate = round(active_count / total * 100, 1) if total else 0.0
+
+        # 4. Growth since last snapshot.
+        snapshots = await db.execute_query(
+            "SELECT snapshot_date, total, active FROM monthly_snapshots "
+            "WHERE district = $1 ORDER BY snapshot_date",
+            (name,),
+            fetch_all=True,
+        )
+        growth_text = _compute_growth_text(snapshots)
+
+        # 5. Top recruiters for this settlement (from the recruiters junction).
+        top_recruiters = await db.execute_query(
+            "SELECT r.recruiter_discord_id, COUNT(*) as cnt "
+            "FROM recruiters r JOIN citizens c ON r.ign = c.ign "
+            "WHERE c.settlement = $1 "
+            "GROUP BY r.recruiter_discord_id ORDER BY cnt DESC LIMIT 5",
+            (name,),
+            fetch_all=True,
+        )
+
+        # 6. Build the dashboard embed.
+        duchy_name = settlement["duchy"]
+        emoji = await emoji_db.get_province(duchy_name)
+        header = f"{emoji} {name}".strip() if emoji else name
+
+        embed = discord.Embed(
+            title=f"🏘️ {header} — Settlement Dashboard",
+            description=f"Duchy: **{duchy_name}**",
+            color=0x7289DA,
+        )
+        embed.add_field(name="Total Citizens", value=str(total), inline=True)
+        embed.add_field(
+            name="Active Rate",
+            value=f"{active_rate}%" if total else "N/A",
+            inline=True,
+        )
+        embed.add_field(name="Growth", value=growth_text, inline=True)
+
+        # Activity breakdown.
+        if total:
+            unknown = total - active_count - semi_count - inactive_count
+            embed.add_field(
+                name="Activity Breakdown",
+                value=(
+                    f"🟢 Active: {active_count}\n"
+                    f"🟠 Semi-Active: {semi_count}\n"
+                    f"🔴 Inactive: {inactive_count}\n"
+                    f"⚪ Unknown: {unknown}"
+                ),
+                inline=True,
+            )
+
+        # Top recruiters.
+        if top_recruiters:
+            lines = []
+            for idx, row in enumerate(top_recruiters, start=1):
+                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"{idx}.")
+                lines.append(f"{medal} <@{row['recruiter_discord_id']}> — **{row['cnt']}**")
+            embed.add_field(name="Top Recruiters", value="\n".join(lines)[:1024], inline=True)
+
+        # Member list (first 20, paginated if more).
+        if citizens:
+            member_lines = [f"• {c['ign']}" for c in citizens[:20]]
+            member_value = "\n".join(member_lines)
+            if total > 20:
+                member_value += f"\n*...and {total - 20} more — use /citizen list*"
+            embed.add_field(
+                name=f"Members ({total})",
+                value=member_value[:1024],
+                inline=False,
+            )
+
+        embed.set_footer(text=f"Settlement: {name} • Data: registry + CivInfo")
+        await interaction.followup.send(embed=embed)
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers (testable without Discord / DB)
+# ---------------------------------------------------------------------------
+
+
+def _compute_growth_text(snapshots: list[dict] | None) -> str:
+    """Compute a human-readable growth string from monthly snapshots.
+
+    Returns 'N/A' if no snapshots, '+N (last M months)' if growth exists,
+    or a 'no change' note if the count is flat.
+    """
+    if not snapshots or len(snapshots) < 1:
+        return "N/A"
+    if len(snapshots) == 1:
+        return f"+{snapshots[0]['total']} (first snapshot)"
+    first = snapshots[0]
+    last = snapshots[-1]
+    diff = last["total"] - first["total"]
+    months = len(snapshots)
+    sign = "+" if diff >= 0 else ""
+    return f"{sign}{diff} (last {months} months)"
+
 
 async def setup(bot):
     await bot.add_cog(SettlementCog(bot))

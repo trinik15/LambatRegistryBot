@@ -170,7 +170,12 @@ M ≈ 1–2 days, L ≈ 3–5 days) and assume a single contributor who knows di
 > ✅ Phase 1 **implemented** — `pyproject.toml` (ruff/mypy/pytest), GitHub Actions
 > CI, 54 tests covering the honesty branches, structlog JSON logging + gateway
 > lifecycle hooks + optional Sentry, and a Prometheus `/metrics` endpoint.
-> Phases 2–5 remain planned.
+> ✅ Phase 2 **implemented** — audit log, recruiters junction, duchy column,
+> DB-backed emojis, role-sync weekly task (commit `2bfd457`).
+> ✅ Phase 3 **implemented** — CSV import, citizen search, settlement dashboard,
+> self-service applications, activity time-series + activity export, governance
+> notifications, CivMC online-now list (168 tests, all green).
+> Phases 4–5 remain planned.
 
 ### Phase 0 — Stabilize & de-risk (before adding anything new)
 
@@ -243,23 +248,58 @@ queryable entities; duchies and emojis are data, not code. — **MET**
 
 ---
 
-### Phase 3 — Feature expansion (the "more features" the community will feel)
+### Phase 3 — Feature expansion (the "more features" the community will feel)  ✅ COMPLETE
 
 **Goal:** reduce council toil and give leadership richer tooling.
 
-| ID | Task | Effort | Touches |
-|---|---|---|---|
-| **3.1** | **Bulk import via CSV.** `/citizen import` (Council) accepts a CSV attachment with the same columns as `/report export`. Dry-run preview (shows conflicts: duplicate IGN, unknown settlement, bad IGN format) then a confirm button. Reuses `role_manager` and `civinfo_api` per row with the existing semaphore. | L | new `cogs/citizen.py` subcommand or `cogs/import_.py` |
-| **3.2** | **`/citizen search`.** Full-text-ish search across IGN, discord_id, settlement, recruiter. Paginated results reusing `PaginationView`. Adds a GIN index on `citizens` if needed. | M | `cogs/citizen.py` |
-| **3.3** | **`/settlement info <name>`.** Single-settlement dashboard embed: total, active rate, growth since last snapshot, top recruiters, member list (paginated). | M | `cogs/settlement.py` |
-| **3.4** | **Self-service `/apply`.** Non-citizen runs `/apply ign settlement recruiter`; creates a `citizen_applications` row (status=pending) and posts to an `APPLICATIONS_CHANNEL_ID` with Approve/Reject buttons. Council approval triggers the normal `citizen_add` path. | L | new `cogs/applications.py`, `core/database.py` |
-| **3.5** | **`/report activity <scope>`.** Time-series for a single citizen or a single settlement over the available snapshots (line chart). Extends `services/charts.py` with a `render_activity_series` function. | M | `cogs/reports.py`, `services/charts.py` |
-| **3.6** | **Activity export.** Extend `/report export` with an optional `include_activity=true` flag that joins `activity_cache` (and falls back to a live CivInfo fetch + cache) so the CSV has the Active/Semi/Inactive column leadership actually wants. | S | `cogs/reports.py` |
-| **3.7** | **Governance notifications.** Configurable `GOVERNANCE_CHANNEL_ID` that receives an embed on every citizen add/remove and settlement add/remove (read-only mirror of the audit log for the wider council). | S | `cogs/citizen.py`, `cogs/settlement.py`, `services/audit.py` |
-| **3.8** | **CivMC-player online-now list.** `/server online` lists currently-online players (mcsrvstat returns a `players.list`) cross-referenced with the registry, so leadership can see "which of *our* citizens are on right now." | S | `cogs/server.py` |
+| ID | Task | Effort | Touches | Status |
+|---|---|---|---|---|
+| **3.1** | **Bulk import via CSV.** `/citizen import` (Council) accepts a CSV attachment with the same columns as `/report export`. Dry-run preview (shows conflicts: duplicate IGN, unknown settlement, bad IGN format) then a confirm button. Reuses `role_manager` and `civinfo_api` per row with the existing semaphore. | L | new `cogs/citizen.py` subcommand or `cogs/import_.py` | ✅ |
+| **3.2** | **`/citizen search`.** Full-text-ish search across IGN, discord_id, settlement, recruiter. Paginated results reusing `PaginationView`. Adds a GIN index on `citizens` if needed. | M | `cogs/citizen.py` | ✅ |
+| **3.3** | **`/settlement info <name>`.** Single-settlement dashboard embed: total, active rate, growth since last snapshot, top recruiters, member list (paginated). | M | `cogs/settlement.py` | ✅ |
+| **3.4** | **Self-service `/apply`.** Non-citizen runs `/apply ign settlement recruiter`; creates a `citizen_applications` row (status=pending) and posts to an `APPLICATIONS_CHANNEL_ID` with Approve/Reject buttons. Council approval triggers the normal `citizen_add` path. | L | new `cogs/applications.py`, `core/database.py` | ✅ |
+| **3.5** | **`/report activity <scope>`.** Time-series for a single citizen or a single settlement over the available snapshots (line chart). Extends `services/charts.py` with a `render_activity_series` function. | M | `cogs/reports.py`, `services/charts.py` | ✅ |
+| **3.6** | **Activity export.** Extend `/report export` with an optional `include_activity=true` flag that joins `activity_cache` (and falls back to a live CivInfo fetch + cache) so the CSV has the Active/Semi/Inactive column leadership actually wants. | S | `cogs/reports.py` | ✅ |
+| **3.7** | **Governance notifications.** Configurable `GOVERNANCE_CHANNEL_ID` that receives an embed on every citizen add/remove and settlement add/remove (read-only mirror of the audit log for the wider council). | S | `cogs/citizen.py`, `cogs/settlement.py`, `services/audit.py` | ✅ |
+| **3.8** | **CivMC-player online-now list.** `/server online` lists currently-online players (mcsrvstat returns a `players.list`) cross-referenced with the registry, so leadership can see "which of *our* citizens are on right now." | S | `cogs/server.py` | ✅ |
 
 **Exit criteria:** council adds citizens in bulk; citizens can apply themselves;
-leadership has per-settlement and per-citizen activity dashboards.
+leadership has per-settlement and per-citizen activity dashboards. — **MET**
+
+**What shipped:**
+- `services/csv_import.py` pure parser with `parse_csv()` + `ParsedRow`/`ParseResult`
+  dataclasses; validates IGN format, Discord ID, settlement existence, duplicate
+  IGNs (both within CSV and against existing registry); handles UTF-8 BOM + case-
+  insensitive headers. `/citizen import` with dry-run preview embed + ConfirmImportView
+  (Confirm/Cancel buttons); imports via transaction-aware `_import_single_citizen`.
+- `citizen_applications` table (BIGSERIAL PK, CITEXT ign, applicant_discord_id,
+  settlement, recruiter, status, timestamps) + partial unique index preventing
+  duplicate pending apps per user; `services/applications.py` data layer;
+  `cogs/applications.py` with `/apply` (open to all), `/application list` (Council),
+  ApplicationReviewView with Approve/Reject buttons. Approval runs the full
+  citizen_add path (INSERT + recruiters junction + audit + governance mirror).
+- `/citizen search` with ILIKE + pg_trgm GIN index for fast partial matching;
+  searches IGN + settlement (and Discord ID + recruiter when query is numeric);
+  paginated via PaginationView (10 per page).
+- `/settlement info` dashboard: total citizens, activity breakdown (Active/Semi/
+  Inactive from CivInfo batch fetch), growth since last snapshot, top recruiters,
+  member list. `_compute_growth_text` pure helper tested.
+- `render_activity_series` in `services/charts.py` — single-panel line chart with
+  optional active/inactive stacked area. `/report activity <settlement?>` renders
+  time-series from monthly_snapshots. `/report export` extended with
+  `include_activity` flag (LEFT JOINs activity_cache + falls back to live CivInfo
+  batch fetch for missing entries).
+- `audit.post_to_governance_channel()` + `_build_governance_embed()` — plain-
+  language embed for the wider council (non-technical audience). Wired into all
+  5 mutation points (citizen add/update/remove, settlement add/remove).
+  `GOVERNANCE_CHANNEL_ID` config + no-op when it equals `AUDIT_CHANNEL_ID`.
+- `/server online` cross-references mcsrvstat `players.list` with the registry;
+  `_partition_citizens` pure helper splits online players into citizens + non-
+  citizens (case-insensitive CITEXT match); embed shows Lambat citizens first
+  with their settlement, then other players.
+- 59 new tests (csv_import parser, search embed builder, settlement growth,
+  activity label mapping, activity chart rendering, online-now partition + embed,
+  applications IGN validation + status constants). Total: 168 passing.
 
 ---
 

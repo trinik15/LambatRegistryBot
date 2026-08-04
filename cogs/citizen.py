@@ -882,6 +882,315 @@ class CitizenCog(commands.Cog):
         embed.set_footer(text="Sourced from the recruiters junction table")
         await interaction.followup.send(embed=embed)
 
+    @citizen_group.command(
+        name="search", description="Search citizens by IGN, settlement, or Discord ID"
+    )
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "citizen_search")
+    )
+    @app_commands.describe(
+        query="Search term (IGN, settlement name, or Discord user ID)",
+    )
+    async def citizen_search(self, interaction: discord.Interaction, query: str):
+        """Phase 3.2: full-text-ish search across the registry.
+
+        Searches IGN (ILIKE, trigram-indexed), settlement name, and Discord ID.
+        Results are paginated via PaginationView.
+        """
+        if not self.has_view_access(interaction):
+            return await interaction.response.send_message(
+                "❌ You don't have permission to search citizens.", ephemeral=True
+            )
+
+        q = query.strip()
+        if not q or len(q) < 2:
+            await interaction.response.send_message(
+                "❌ Search query must be at least 2 characters.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+
+        rows = await _search_citizens(q)
+        if not rows:
+            await interaction.followup.send(f"No citizens found matching `{q}`.", ephemeral=True)
+            return
+
+        embeds = _build_search_results_embeds(q, rows)
+        view = PaginationView(embeds, interaction.user, timeout=180)
+        await interaction.followup.send(embed=embeds[0], view=view)
+        view.message = await interaction.original_response()
+
+    @citizen_group.command(name="import", description="Bulk import citizens from a CSV file")
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_CRITICAL, key=lambda i: (i.user.id, "citizen_import")
+    )
+    @app_commands.describe(
+        file="CSV file with columns: IGN, Discord ID, Settlement, Join Date, Address, Mailbox, Recruiter IDs, Notes"
+    )
+    async def citizen_import(self, interaction: discord.Interaction, file: discord.Attachment):
+        """Phase 3.1: bulk CSV import with dry-run preview + confirm button."""
+        if not self.has_full_access(interaction):
+            return await interaction.response.send_message(
+                "❌ You need the Council role to use this command.", ephemeral=True
+            )
+
+        if not file.filename.lower().endswith(".csv"):
+            await interaction.response.send_message(
+                "❌ The file must be a .csv file.", ephemeral=True
+            )
+            return
+
+        if file.size > 1_000_000:  # 1MB cap
+            await interaction.response.send_message("❌ File too large (max 1MB).", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            data = await file.read()
+        except Exception as e:
+            logger.error(f"Failed to read CSV attachment: {e}", exc_info=True)
+            await interaction.followup.send("❌ Could not read the file.", ephemeral=True)
+            return
+
+        # Fetch known settlements + existing IGNs for validation.
+        settlement_rows = await db.execute_query("SELECT name FROM settlements", fetch_all=True)
+        known_settlements = [r["name"] for r in settlement_rows] if settlement_rows else []
+
+        existing_rows = await db.execute_query("SELECT ign FROM citizens", fetch_all=True)
+        existing_igns = [r["ign"] for r in existing_rows] if existing_rows else []
+
+        # Parse + validate (pure function, no DB calls).
+        from services import csv_import
+
+        result = csv_import.parse_csv(data, known_settlements, existing_igns)
+
+        if result.total == 0:
+            await interaction.followup.send(
+                "❌ The CSV file is empty or has no valid rows.", ephemeral=True
+            )
+            return
+
+        embed = _build_import_preview_embed(result)
+        view = ConfirmImportView(result, interaction.user)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        view.message = await interaction.original_response()
+
+
+class ConfirmImportView(discord.ui.View):
+    """Confirm/Cancel buttons for the CSV import dry-run (Phase 3.1)."""
+
+    def __init__(self, result, user: discord.User | discord.Member):
+        super().__init__(timeout=300)
+        self.result = result
+        self.user = user
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message(
+                "Only the person who started the import can confirm it.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Import", style=discord.ButtonStyle.success, emoji="✅")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+
+        imported = 0
+        skipped = 0
+        errors: list[str] = []
+
+        for row in self.result.rows:
+            if not row.is_valid:
+                skipped += 1
+                continue
+            try:
+                await _import_single_citizen(row)
+                imported += 1
+            except Exception as e:
+                logger.error(f"Failed to import row {row.line} ({row.ign}): {e}", exc_info=True)
+                errors.append(f"Line {row.line} ({row.ign}): {e}")
+                skipped += 1
+
+        embed = discord.Embed(
+            title="✅ Import Complete",
+            description=(
+                f"**{imported}** citizen(s) imported successfully.\n**{skipped}** row(s) skipped."
+            ),
+            color=0x43B581 if not errors else 0xFFCC00,
+        )
+        if errors:
+            error_text = "\n".join(errors[:10])
+            if len(errors) > 10:
+                error_text += f"\n*...and {len(errors) - 10} more errors*"
+            embed.add_field(name="Errors", value=error_text[:1024], inline=False)
+
+        for child in self.children:
+            child.disabled = True
+        await interaction.edit_original_response(embed=embed, view=self)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, emoji="✖️")
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="❌ Import Cancelled",
+            description="No changes were made to the registry.",
+            color=0xED4245,
+        )
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_original_response(embed=embed, view=self)
+
+
+async def _import_single_citizen(row) -> None:
+    """Import a single validated CSV row into the DB (Phase 3.1)."""
+    from services import recruiters as recruiters_svc
+    from utils import parse_join_date
+
+    join_date = parse_join_date(row.join_date) if row.join_date else None
+    if join_date is None:
+        from datetime import date
+
+        join_date = date.today()
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
+            "INSERT INTO citizens (ign, discord_id, settlement, recruiter_ids, "
+            "address, mailbox, notes, join_date) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            row.ign,
+            row.discord_id,
+            row.settlement,
+            row.recruiter_ids or "",
+            row.address or None,
+            row.mailbox or None,
+            row.notes or None,
+            join_date,
+        )
+        if row.recruiter_ids:
+            recruiter_list = [
+                r.strip() for r in row.recruiter_ids.split(",") if r.strip().isdigit()
+            ]
+            await recruiters_svc.set_recruiters(row.ign, recruiter_list, connection=conn)
+
+
+def _build_import_preview_embed(result) -> discord.Embed:
+    """Build the dry-run preview embed showing valid/invalid rows."""
+    color = 0x43B581 if result.invalid_count == 0 else 0xFFCC00
+    embed = discord.Embed(
+        title="📋 CSV Import Preview (Dry Run)",
+        description=(
+            f"**{result.total}** rows parsed — "
+            f"✅ **{result.valid_count}** valid, "
+            f"❌ **{result.invalid_count}** invalid."
+        ),
+        color=color,
+    )
+
+    invalid_rows = [r for r in result.rows if not r.is_valid]
+    if invalid_rows:
+        lines = []
+        for row in invalid_rows[:10]:
+            errors = "; ".join(row.errors)
+            lines.append(f"• Line {row.line}: {errors}")
+        if len(invalid_rows) > 10:
+            lines.append(f"*...and {len(invalid_rows) - 10} more invalid rows*")
+        embed.add_field(name="❌ Invalid Rows", value="\n".join(lines)[:1024], inline=False)
+
+    valid_rows = [r for r in result.rows if r.is_valid]
+    if valid_rows:
+        lines = []
+        for row in valid_rows[:10]:
+            lines.append(f"• **{row.ign}** — {row.settlement}")
+        if len(valid_rows) > 10:
+            lines.append(f"*...and {len(valid_rows) - 10} more valid rows*")
+        embed.add_field(name="✅ Valid Rows (preview)", value="\n".join(lines)[:1024], inline=False)
+
+    if result.duplicate_igns_in_csv:
+        dup_text = ", ".join(result.duplicate_igns_in_csv[:10])
+        if len(result.duplicate_igns_in_csv) > 10:
+            dup_text += f" *...and {len(result.duplicate_igns_in_csv) - 10} more*"
+        embed.add_field(
+            name="⚠️ Existing IGNs (will be skipped)", value=dup_text[:1024], inline=False
+        )
+
+    embed.set_footer(text="Click ✅ Confirm Import to proceed, or ✖️ Cancel to abort.")
+    return embed
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers (testable without Discord / DB)
+# ---------------------------------------------------------------------------
+
+
+async def _search_citizens(query: str) -> list[dict]:
+    """Search citizens by IGN, settlement, or Discord ID.
+
+    Uses ILIKE for partial case-insensitive matching (the trigram index
+    added in Phase 3.2 makes this fast). When the query looks like a Discord
+    ID (all digits), also matches discord_id and recruiter_discord_id.
+    """
+    pattern = f"%{query}%"
+    is_numeric = query.isdigit()
+
+    if is_numeric:
+        # Search IGN + settlement + discord_id + recruiter junction.
+        rows = await db.execute_query(
+            "SELECT DISTINCT c.ign, c.discord_id, c.settlement, c.join_date "
+            "FROM citizens c "
+            "LEFT JOIN recruiters r ON r.ign = c.ign "
+            "WHERE c.ign ILIKE $1 OR c.settlement ILIKE $1 "
+            "OR c.discord_id = $2 OR r.recruiter_discord_id = $2 "
+            "ORDER BY c.ign LIMIT 100",
+            (pattern, query),
+            fetch_all=True,
+        )
+    else:
+        rows = await db.execute_query(
+            "SELECT ign, discord_id, settlement, join_date FROM citizens "
+            "WHERE ign ILIKE $1 OR settlement ILIKE $1 "
+            "ORDER BY ign LIMIT 100",
+            (pattern,),
+            fetch_all=True,
+        )
+    return [dict(r) for r in rows] if rows else []
+
+
+def _build_search_results_embeds(query: str, rows: list[dict]) -> list[discord.Embed]:
+    """Build paginated embeds for search results (max 10 per page)."""
+    embeds: list[discord.Embed] = []
+    per_page = 10
+    total = len(rows)
+
+    for i in range(0, total, per_page):
+        chunk = rows[i : i + per_page]
+        page_num = i // per_page + 1
+        total_pages = (total + per_page - 1) // per_page
+
+        embed = discord.Embed(
+            title=f"🔍 Search: '{query}'",
+            description=f"**{total}** result(s) found.",
+            color=0x7289DA,
+        )
+        lines = []
+        for row in chunk:
+            join_str = utils.format_date(row["join_date"]) if row["join_date"] else "—"
+            lines.append(
+                f"• **{row['ign']}** — {row['settlement']} "
+                f"(<@{row['discord_id']}>, joined {join_str})"
+            )
+        embed.add_field(
+            name=f"Results (page {page_num}/{total_pages})",
+            value="\n".join(lines)[:1024],
+            inline=False,
+        )
+        embed.set_footer(text=f"Page {page_num}/{total_pages} • {total} citizens")
+        embeds.append(embed)
+
+    return embeds
+
 
 async def setup(bot):
     await bot.add_cog(CitizenCog(bot))

@@ -371,7 +371,10 @@ class ReportsCog(commands.Cog):
     @app_commands.checks.cooldown(
         1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_export")
     )
-    async def report_export(self, interaction: discord.Interaction):
+    @app_commands.describe(
+        include_activity="If true, add an Activity column (Active/Semi/Inactive) from CivInfo"
+    )
+    async def report_export(self, interaction: discord.Interaction, include_activity: bool = False):
         if not self.has_view_access(interaction):
             return await interaction.response.send_message(
                 "❌ You don't have permission to export data.", ephemeral=True
@@ -379,54 +382,183 @@ class ReportsCog(commands.Cog):
 
         await interaction.response.defer()
 
-        rows = await db.execute_query(
-            "SELECT ign, discord_id, settlement, join_date, address, mailbox, "
-            "recruiter_ids, notes FROM citizens ORDER BY settlement, ign",
-            fetch_all=True,
-        )
+        # Phase 3.6: optionally LEFT JOIN activity_cache so the CSV has the
+        # Active/Semi/Inactive status leadership actually wants. If the cache
+        # is stale or missing, fall back to a live CivInfo batch fetch.
+        if include_activity:
+            rows = await db.execute_query(
+                "SELECT c.ign, c.discord_id, c.settlement, c.join_date, "
+                "c.address, c.mailbox, c.recruiter_ids, c.notes, "
+                "ac.status as activity_status, ac.last_login "
+                "FROM citizens c LEFT JOIN activity_cache ac ON ac.ign = c.ign "
+                "ORDER BY c.settlement, c.ign",
+                fetch_all=True,
+            )
+        else:
+            rows = await db.execute_query(
+                "SELECT ign, discord_id, settlement, join_date, address, mailbox, "
+                "recruiter_ids, notes FROM citizens ORDER BY settlement, ign",
+                fetch_all=True,
+            )
 
         if not rows:
             await interaction.followup.send("No data to export.", ephemeral=True)
             return
 
+        # Phase 3.6: if include_activity and any citizen lacks cached activity,
+        # do a live CivInfo batch fetch to fill the gaps.
+        activity_map: dict[str, str] = {}
+        if include_activity:
+            missing_igns = [r["ign"] for r in rows if not r.get("activity_status")]
+            if missing_igns:
+                activities = await _fetch_activities(missing_igns, self.bot.http_session)
+                for ign, (status, _emoji, _last_login, _text) in activities.items():
+                    activity_map[ign] = _activity_label(status)
+
         # Create CSV in memory
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(
-            [
-                "IGN",
-                "Discord ID",
-                "Settlement",
-                "Join Date",
-                "Address",
-                "Mailbox",
-                "Recruiter IDs",
-                "Notes",
-            ]
-        )
+        header = [
+            "IGN",
+            "Discord ID",
+            "Settlement",
+            "Join Date",
+            "Address",
+            "Mailbox",
+            "Recruiter IDs",
+            "Notes",
+        ]
+        if include_activity:
+            header.append("Activity")
+        writer.writerow(header)
 
         for row in rows:
-            writer.writerow(
-                [
-                    row["ign"],
-                    row["discord_id"],
-                    row["settlement"],
-                    utils.format_date(row["join_date"]),
-                    row["address"] or "",
-                    row["mailbox"] or "",
-                    row["recruiter_ids"] or "",
-                    row["notes"] or "",
-                ]
-            )
+            line = [
+                row["ign"],
+                row["discord_id"],
+                row["settlement"],
+                utils.format_date(row["join_date"]),
+                row["address"] or "",
+                row["mailbox"] or "",
+                row["recruiter_ids"] or "",
+                row["notes"] or "",
+            ]
+            if include_activity:
+                status = row.get("activity_status") or activity_map.get(row["ign"], "Unknown")
+                line.append(_activity_label(status) if len(status) > 2 else status)
+            writer.writerow(line)
 
         output.seek(0)
-        file = discord.File(io.BytesIO(output.getvalue().encode()), filename="citizens_export.csv")
+        filename = (
+            "citizens_export.csv" if not include_activity else "citizens_export_with_activity.csv"
+        )
+        file = discord.File(io.BytesIO(output.getvalue().encode()), filename=filename)
 
         embed = discord.Embed(
             title="📎 Data Export",
-            description=f"Exported {len(rows)} citizens to CSV.",
+            description=f"Exported {len(rows)} citizens to CSV{' (with activity)' if include_activity else ''}.",
             color=0x43B581,
         )
+        await interaction.followup.send(embed=embed, file=file)
+
+    @reports_group.command(
+        name="activity", description="Show activity time-series for a single settlement"
+    )
+    @app_commands.autocomplete(settlement=settlement_autocomplete)
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_SLOW, key=lambda i: (i.user.id, "report_activity")
+    )
+    @app_commands.describe(settlement="Settlement name to chart (leave empty for national totals)")
+    async def report_activity(
+        self, interaction: discord.Interaction, settlement: str | None = None
+    ):
+        """Phase 3.5: time-series line chart for a settlement or the nation."""
+        if not self.has_view_access(interaction):
+            return await interaction.response.send_message(
+                "❌ You don't have permission to view reports.", ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        # Fetch monthly snapshots for the settlement (district = name) or
+        # national totals (district IS NULL) when no settlement is given.
+        if settlement:
+            snapshots = await db.execute_query(
+                "SELECT snapshot_date, total, active FROM monthly_snapshots "
+                "WHERE district = $1 ORDER BY snapshot_date",
+                (settlement,),
+                fetch_all=True,
+            )
+            chart_title = f"{settlement} — Population & Activity"
+        else:
+            snapshots = await db.execute_query(
+                "SELECT snapshot_date, total, active FROM monthly_snapshots "
+                "WHERE district IS NULL ORDER BY snapshot_date",
+                fetch_all=True,
+            )
+            chart_title = "National Population & Activity"
+
+        if not snapshots:
+            await interaction.followup.send(
+                "No monthly snapshots found yet. Snapshots are generated on the 1st of each month.",
+                ephemeral=True,
+            )
+            return
+
+        dates = [s["snapshot_date"] for s in snapshots]
+        totals = [s["total"] for s in snapshots]
+        actives = [s["active"] for s in snapshots]
+
+        import services.charts as charts
+
+        try:
+            png_bytes = await asyncio.get_event_loop().run_in_executor(
+                None,
+                charts.render_activity_series,
+                chart_title,
+                dates,
+                totals,
+                actives,
+            )
+        except Exception as e:
+            logger.error(f"Failed to render activity chart: {e}", exc_info=True)
+            await interaction.followup.send(
+                "❌ Could not render the activity chart.", ephemeral=True
+            )
+            return
+
+        if not png_bytes:
+            await interaction.followup.send("Not enough data to render the chart.", ephemeral=True)
+            return
+
+        # Summary embed alongside the chart.
+        first_date = dates[0]
+        last_date = dates[-1]
+        first_total = totals[0]
+        last_total = totals[-1]
+        growth = last_total - first_total
+        sign = "+" if growth >= 0 else ""
+
+        embed = discord.Embed(
+            title=f"📈 Activity: {settlement or 'National'}",
+            description=(
+                f"Monthly snapshots from **{utils.format_date(first_date)}** "
+                f"to **{utils.format_date(last_date)}** ({len(dates)} data points)"
+            ),
+            color=0x3BAD4C,
+        )
+        embed.add_field(name="Current Total", value=str(last_total), inline=True)
+        embed.add_field(
+            name="Growth",
+            value=f"{sign}{growth} ({sign}{round(growth / first_total * 100, 1)}%)"
+            if first_total
+            else "N/A",
+            inline=True,
+        )
+        embed.set_image(url="attachment://activity.png")
+        embed.set_footer(text="Rendered from monthly_snapshots • /report activity")
+
+        file = discord.File(io.BytesIO(png_bytes), filename="activity.png")
         await interaction.followup.send(embed=embed, file=file)
 
     @reports_group.command(
@@ -471,3 +603,28 @@ class ReportsCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ReportsCog(bot))
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers (testable without Discord / DB)
+# ---------------------------------------------------------------------------
+
+
+def _activity_label(status: str) -> str:
+    """Map a CivInfo activity status code to a human-readable CSV label.
+
+    CivInfo returns: 'active' (<30d), 'semi' (30-60d), 'inactive' (>60d),
+    'unknown' (no data), 'error' (API failure). The activity_cache stores
+    the raw status; we map it to the label leadership expects in exports.
+    """
+    mapping = {
+        "active": "Active",
+        "semi": "Semi-Active",
+        "inactive": "Inactive",
+        "unknown": "Unknown",
+        "error": "Error",
+    }
+    # If the status is already a label (from a live fetch), return as-is.
+    if status in mapping.values():
+        return status
+    return mapping.get(status, "Unknown")
