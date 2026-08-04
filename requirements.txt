@@ -1,8 +1,15 @@
-aiohttp>=3.13.3
-discord-py>=2.6.4
-asyncpg>=0.29.0
-matplotlib>=3.7.0
+# Lambat Registry Bot — pinned runtime dependencies.
+#
+# These versions are pinned (==) to match the verified-green baseline so CI and
+# production deploy against exactly what was tested. Bump deliberately and re-run
+# the full QA suite (ruff format/check, mypy, pytest) before committing.
+#
+# Runtime deps (required for the bot to start):
+aiohttp==3.14.3
+discord.py==2.7.1
+asyncpg==0.31.0
+matplotlib==3.11.1
 # Phase 1: structured logging + Prometheus metrics are now used at startup
 # (core/logging_config.py, core/metrics.py) and are therefore runtime deps.
-structlog>=24.1.0
-prometheus-client>=0.20.0
+structlog==26.1.0
+prometheus-client==0.26.0

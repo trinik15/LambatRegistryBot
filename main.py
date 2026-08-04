@@ -164,6 +164,22 @@ class LambatRegistryBot(commands.Bot):
         # close() method logs the clean-shutdown context separately.
         logger.warning("Discord gateway: DISCONNECTED. Will retry automatically.")
 
+    async def on_guild_available(self, guild: discord.Guild):
+        # Fired when a guild becomes available (initial ready, or after an outage
+        # that made it unavailable). Logs the transition so a guild-side Discord
+        # outage is visible alongside our own gateway events.
+        logger.info(
+            "Discord guild available: %s (id=%s, members=%d).",
+            guild.name,
+            guild.id,
+            guild.member_count or 0,
+        )
+
+    async def on_guild_unavailable(self, guild: discord.Guild):
+        # The counterpart to on_guild_available — the guild is still in cache but
+        # Discord reports it temporarily unavailable (usually a Discord-side incident).
+        logger.warning("Discord guild unavailable: %s (id=%s).", guild.name, guild.id)
+
     async def on_app_command_error(
         self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError
     ):
