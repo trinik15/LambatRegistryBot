@@ -13,7 +13,8 @@ from api import civinfo_api
 from core import database as db
 from core.config import Config
 from core.constants import Limits
-from services import role_manager
+from services import audit, role_manager
+from services import recruiters as recruiters_svc
 from utils import PaginationView
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,24 @@ class CitizenRemoveConfirm(discord.ui.View):
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute("DELETE FROM citizens WHERE ign = $1", self.ign)
             await conn.execute("DELETE FROM activity_cache WHERE ign = $1", self.ign)
+            # recruiters junction cascades on delete, no manual cleanup needed.
+            # Phase 2.1: audit the removal atomically with the delete.
+            await audit.emit(
+                audit.CITIZEN_REMOVE,
+                interaction.user.id,
+                self.ign,
+                {"discord_id": self.discord_id, "settlement": self.settlement},
+                connection=conn,
+            )
+
+        # Phase 2.1: mirror to the audit channel (best-effort, post-commit).
+        await audit.post_to_channel(
+            interaction.client,
+            audit.CITIZEN_REMOVE,
+            str(interaction.user.id),
+            self.ign,
+            {"discord_id": self.discord_id, "settlement": self.settlement},
+        )
 
         # Role removal happens after the DB delete; surface failures honestly.
         role_warning = None
@@ -287,6 +306,10 @@ class CitizenCog(commands.Cog):
                     join_date_obj,
                 )
 
+                # Phase 2.2: dual-write recruiters into the junction table
+                # (source of truth). recruiter_ids stays as a denormalised cache.
+                await recruiters_svc.set_recruiters(ign, recruiters, connection=conn)
+
                 if last_login:
                     await conn.execute(
                         "INSERT INTO activity_cache (ign, last_login, status) VALUES ($1, $2, $3) "
@@ -295,6 +318,22 @@ class CitizenCog(commands.Cog):
                         last_login,
                         status,
                     )
+
+                # Phase 2.1: audit the add inside the transaction so it's
+                # atomic — either the citizen + audit row commit together,
+                # or neither does.
+                await audit.emit(
+                    audit.CITIZEN_ADD,
+                    interaction.user.id,
+                    ign,
+                    {
+                        "discord_id": str(discord_user.id),
+                        "settlement": settlement,
+                        "recruiters": recruiters,
+                        "join_date": join_date_obj.isoformat(),
+                    },
+                    connection=conn,
+                )
 
         # Role assignment happens after the DB commit (the registry is the
         # source of truth). If Discord role assignment fails we must NOT claim
@@ -310,6 +349,20 @@ class CitizenCog(commands.Cog):
 
         self.autocomplete_cache.invalidate_citizen_cache()
         self.autocomplete_cache.invalidate_settlement_cache()
+
+        # Phase 2.1: mirror the audit event to the (optional) audit channel.
+        # Best-effort: a Discord failure here must not corrupt the success path.
+        await audit.post_to_channel(
+            self.bot,
+            audit.CITIZEN_ADD,
+            str(interaction.user.id),
+            ign,
+            {
+                "discord_id": str(discord_user.id),
+                "settlement": settlement,
+                "recruiters": recruiters,
+            },
+        )
 
         if role_error or civinfo_warning:
             embed = discord.Embed(
@@ -504,6 +557,9 @@ class CitizenCog(commands.Cog):
                 params.append(new_join_date_obj)
                 changes["Join Date"] = (utils.format_date(old_join_date), join_date)
 
+        # Track the new recruiter list separately so we can sync the junction
+        # table after the UPDATE. None means recruiters weren't touched.
+        new_recruiters_list: list[str] | None = None
         if any([recruiter1, recruiter2, recruiter3]):
             new_recruiters = []
             if recruiter1:
@@ -521,6 +577,7 @@ class CitizenCog(commands.Cog):
                 )
                 new_recruiters_mentions = ", ".join([f"<@{rid}>" for rid in new_recruiters])
                 changes["Recruiters"] = (old_recruiters_mentions, new_recruiters_mentions)
+                new_recruiters_list = new_recruiters
 
         if not updates:
             await interaction.followup.send(
@@ -536,9 +593,31 @@ class CitizenCog(commands.Cog):
         pool = await db.get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute(query, *params)
+            # Phase 2.2: sync the recruiters junction table if recruiters changed.
+            if new_recruiters_list is not None:
+                await recruiters_svc.set_recruiters(ign, new_recruiters_list, connection=conn)
+            # Phase 2.1: audit the update inside the transaction (atomic).
+            # Serialise the changes dict (tuples → lists) for JSONB.
+            audit_changes = {k: list(v) for k, v in changes.items()}
+            await audit.emit(
+                audit.CITIZEN_UPDATE,
+                interaction.user.id,
+                ign,
+                {"changes": audit_changes},
+                connection=conn,
+            )
 
         civinfo_api.cache.cache.pop(ign, None)
         self.autocomplete_cache.invalidate_citizen_cache()
+
+        # Phase 2.1: mirror to the audit channel (best-effort, post-commit).
+        await audit.post_to_channel(
+            self.bot,
+            audit.CITIZEN_UPDATE,
+            str(interaction.user.id),
+            ign,
+            {"changes": {k: list(v) for k, v in changes.items()}},
+        )
 
         # Role changes happen after the DB commit. Collect any failures so we
         # can surface them honestly instead of silently leaving stale roles.
@@ -730,6 +809,49 @@ class CitizenCog(commands.Cog):
             embed.add_field(name="Notes", value=row["notes"], inline=False)
         embed.set_thumbnail(url=self._skin_url(ign))
 
+        await interaction.followup.send(embed=embed)
+
+    @citizen_group.command(
+        name="recruited-by", description="Show all citizens recruited by a Discord user"
+    )
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "citizen_recruited_by")
+    )
+    async def citizen_recruited_by(
+        self, interaction: discord.Interaction, recruiter: discord.Member
+    ):
+        if not self.has_view_access(interaction):
+            return await interaction.response.send_message(
+                "❌ You don't have permission to view recruiter data.", ephemeral=True
+            )
+
+        await interaction.response.defer()
+
+        # Read from the recruiters junction table (Phase 2.2 source of truth).
+        recruited = await recruiters_svc.get_recruited_by(str(recruiter.id))
+        if not recruited:
+            await interaction.followup.send(
+                f"ℹ️ {recruiter.mention} has not recruited any registered citizens.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"🎯 Citizens Recruited by {recruiter.display_name}",
+            description=f"**{len(recruited)}** citizen(s) recruited.",
+            color=0x7289DA,
+        )
+        lines = []
+        for r in recruited:
+            ts = r["recruited_at"]
+            date_str = utils.format_date(ts, "%Y-%m-%d") if ts else "—"
+            lines.append(f"• **{r['ign']}** — {date_str}")
+        # Chunk into fields of ~30 lines to stay under the 1024-char limit.
+        value = "\n".join(lines)
+        if len(value) > 1020:
+            value = value[:1017] + "..."
+        embed.add_field(name="Recruits", value=value, inline=False)
+        embed.set_footer(text="Sourced from the recruiters junction table")
         await interaction.followup.send(embed=embed)
 
 

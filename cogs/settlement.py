@@ -5,7 +5,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import database as db
+from core import emojis as emoji_db
 from core.config import Config
+from core.constants import Limits
+from services import audit
 
 logger = logging.getLogger(__name__)
 
@@ -57,19 +60,24 @@ class SettlementCog(commands.Cog):
     @app_commands.checks.cooldown(
         1, Config.COOLDOWN_MEDIUM, key=lambda i: (i.user.id, "settlement_add")
     )
-    async def settlement_add(self, interaction: discord.Interaction, name: str):
+    @app_commands.describe(
+        name="Settlement name (2-100 chars)",
+        duchy="The duchy/province this settlement belongs to (e.g. 'Lambat City', 'Florraine')",
+    )
+    async def settlement_add(self, interaction: discord.Interaction, name: str, duchy: str):
         if not self.has_full_access(interaction):
             return await interaction.response.send_message(
                 "❌ You need the Council role to use this command.", ephemeral=True
             )
-
-        from core.constants import Limits
 
         if len(name) > Limits.SETTLEMENT_NAME_MAX or len(name) < 2:
             await interaction.response.send_message(
                 f"❌ Settlement name must be 2–{Limits.SETTLEMENT_NAME_MAX} characters.",
                 ephemeral=True,
             )
+            return
+        if not duchy.strip():
+            await interaction.response.send_message("❌ Duchy must not be empty.", ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -83,12 +91,34 @@ class SettlementCog(commands.Cog):
             )
             return
 
-        await db.execute_query("INSERT INTO settlements (name) VALUES ($1)", (name,))
+        pool = await db.get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                "INSERT INTO settlements (name, duchy) VALUES ($1, $2)", name, duchy.strip()
+            )
+            # Phase 2.1: audit the add atomically.
+            await audit.emit(
+                audit.SETTLEMENT_ADD,
+                interaction.user.id,
+                None,
+                {"name": name, "duchy": duchy.strip()},
+                connection=conn,
+            )
+
         self.invalidate_cache()
+
+        # Phase 2.1: mirror to the audit channel.
+        await audit.post_to_channel(
+            self.bot,
+            audit.SETTLEMENT_ADD,
+            str(interaction.user.id),
+            None,
+            {"name": name, "duchy": duchy.strip()},
+        )
 
         embed = discord.Embed(
             title="✅ Settlement Added",
-            description=f"Settlement **{name}** has been added to the registry.",
+            description=f"Settlement **{name}** ({duchy.strip()}) has been added to the registry.",
             color=0x43B581,
         )
         await interaction.followup.send(embed=embed)
@@ -108,7 +138,7 @@ class SettlementCog(commands.Cog):
 
         # Check if settlement exists
         existing = await db.execute_query(
-            "SELECT name FROM settlements WHERE name = $1", (name,), fetch_one=True
+            "SELECT name, duchy FROM settlements WHERE name = $1", (name,), fetch_one=True
         )
         if not existing:
             await interaction.followup.send(
@@ -130,8 +160,29 @@ class SettlementCog(commands.Cog):
             )
             return
 
-        await db.execute_query("DELETE FROM settlements WHERE name = $1", (name,))
+        duchy = existing["duchy"]
+        pool = await db.get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM settlements WHERE name = $1", name)
+            # Phase 2.1: audit the removal atomically.
+            await audit.emit(
+                audit.SETTLEMENT_REMOVE,
+                interaction.user.id,
+                None,
+                {"name": name, "duchy": duchy},
+                connection=conn,
+            )
+
         self.invalidate_cache()
+
+        # Phase 2.1: mirror to the audit channel.
+        await audit.post_to_channel(
+            self.bot,
+            audit.SETTLEMENT_REMOVE,
+            str(interaction.user.id),
+            None,
+            {"name": name, "duchy": duchy},
+        )
 
         embed = discord.Embed(
             title="✅ Settlement Removed",
@@ -140,12 +191,15 @@ class SettlementCog(commands.Cog):
         )
         await interaction.followup.send(embed=embed)
 
-    @settlement_group.command(name="list", description="List all settlements")
+    @settlement_group.command(name="list", description="List all settlements, grouped by duchy")
     @app_commands.checks.cooldown(
         1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "settlement_list")
     )
     async def settlement_list(self, interaction: discord.Interaction):
-        rows = await db.execute_query("SELECT name FROM settlements ORDER BY name", fetch_all=True)
+        # Phase 2.3: read duchy from the DB (no longer from the hardcoded dict).
+        rows = await db.execute_query(
+            "SELECT name, duchy FROM settlements ORDER BY duchy, name", fetch_all=True
+        )
 
         if not rows:
             await interaction.response.send_message(
@@ -153,13 +207,26 @@ class SettlementCog(commands.Cog):
             )
             return
 
-        settlements = [row["name"] for row in rows]
+        # Group by duchy.
+        by_duchy: dict[str, list[str]] = {}
+        for row in rows:
+            by_duchy.setdefault(row["duchy"], []).append(row["name"])
+
         embed = discord.Embed(
             title="🏘️ Registered Settlements",
-            description="\n".join(f"• {name}" for name in settlements),
+            description=f"**{len(rows)}** settlement(s) across **{len(by_duchy)}** duchy/ies.",
             color=0x7289DA,
         )
-        embed.set_footer(text=f"Total: {len(settlements)} settlements")
+        for duchy, settlements in sorted(by_duchy.items()):
+            # Phase 2.4: look up the duchy emoji from the DB-backed mapping.
+            emoji = await emoji_db.get_province(duchy)
+            header = f"{emoji} {duchy}".strip() if emoji else duchy
+            value = "\n".join(f"• {s}" for s in settlements)
+            if len(value) > 1020:
+                value = value[:1017] + "..."
+            embed.add_field(name=header, value=value, inline=False)
+
+        embed.set_footer(text=f"Total: {len(rows)} settlements")
         await interaction.response.send_message(embed=embed)
 
 
