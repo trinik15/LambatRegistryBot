@@ -199,6 +199,52 @@ async def post_to_channel(
         logger.warning(f"Failed to post audit message to Discord: {e}")
 
 
+async def post_to_governance_channel(
+    bot,
+    action: str,
+    actor_discord_id: str | None,
+    target_ign: str | None,
+    details: dict[str, Any] | None,
+) -> None:
+    """Post a governance-style embed to GOVERNANCE_CHANNEL_ID (best-effort).
+
+    Phase 3.7: this is a read-only mirror of registry mutations for the wider
+    council (a less technical audience than the audit channel). The embed is
+    phrased in plain language so non-admins can follow who joined/left/moved.
+
+    No-op when GOVERNANCE_CHANNEL_ID is 0 or equals AUDIT_CHANNEL_ID (the audit
+    channel already covers it — avoid double-posting).
+    """
+    if not Config.GOVERNANCE_CHANNEL_ID:
+        return
+    if Config.GOVERNANCE_CHANNEL_ID == Config.AUDIT_CHANNEL_ID:
+        return
+    try:
+        channel = bot.get_channel(Config.GOVERNANCE_CHANNEL_ID)
+        if channel is None:
+            channel = await bot.fetch_channel(Config.GOVERNANCE_CHANNEL_ID)
+    except discord.NotFound:
+        logger.warning(f"GOVERNANCE_CHANNEL_ID {Config.GOVERNANCE_CHANNEL_ID} not found.")
+        return
+    except discord.Forbidden:
+        logger.warning("Bot lacks permission to view GOVERNANCE_CHANNEL_ID.")
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not fetch governance channel: {e}")
+        return
+
+    if channel is None:
+        return
+
+    embed = _build_governance_embed(action, actor_discord_id, target_ign, details)
+    try:
+        await channel.send(embed=embed)
+    except discord.Forbidden:
+        logger.warning("Bot lacks permission to send in the governance channel.")
+    except discord.HTTPException as e:
+        logger.warning(f"Failed to post governance message to Discord: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -326,3 +372,63 @@ def _summarise_details(details: dict[str, Any]) -> str:
         return "\n".join(parts)
     # Generic fallback.
     return "\n".join(f"• **{k}**: {v}" for k, v in details.items())
+
+
+def _build_governance_embed(
+    action: str,
+    actor_discord_id: str | None,
+    target_ign: str | None,
+    details: dict[str, Any] | None,
+) -> discord.Embed:
+    """Build a plain-language embed for the GOVERNANCE_CHANNEL_ID mirror.
+
+    Phase 3.7: the governance channel is for the wider council (non-admins),
+    so the phrasing is plain English rather than the terse audit format.
+    E.g. "🟢 New citizen registered: SteveB joined Lambat City" rather than
+    "📜 Audit: Citizen added — Actor: @user, Target: SteveB".
+    """
+    actor_mention = f"<@{actor_discord_id}>" if actor_discord_id else "Council"
+    target_str = target_ign or "—"
+
+    if action == CITIZEN_ADD:
+        settlement = details.get("settlement", "—") if details else "—"
+        title = f"🟢 New Citizen: {target_str}"
+        desc = f"**{target_str}** has joined the nation as a citizen of **{settlement}**.\nApproved by {actor_mention}."
+        color = 0x43B581
+    elif action == CITIZEN_UPDATE:
+        title = f"📝 Citizen Updated: {target_str}"
+        changes_summary = ""
+        if details and "changes" in details:
+            parts = []
+            for field, val in details["changes"].items():
+                if isinstance(val, (list, tuple)) and len(val) == 2:
+                    parts.append(f"• **{field}**: {val[0]} → {val[1]}")
+                else:
+                    parts.append(f"• **{field}**: {val}")
+            changes_summary = "\n".join(parts)
+        desc = f"**{target_str}**'s record was updated by {actor_mention}.\n{changes_summary}"
+        color = 0x5865F2
+    elif action == CITIZEN_REMOVE:
+        title = f"🔴 Citizen Removed: {target_str}"
+        desc = f"**{target_str}** is no longer a registered citizen.\nRemoved by {actor_mention}."
+        color = 0xED4245
+    elif action == SETTLEMENT_ADD:
+        name = details.get("name", "—") if details else "—"
+        duchy = details.get("duchy", "—") if details else "—"
+        title = f"🏘️ New Settlement: {name}"
+        desc = f"**{name}** ({duchy}) has been added to the registry by {actor_mention}."
+        color = 0x43B581
+    elif action == SETTLEMENT_REMOVE:
+        name = details.get("name", "—") if details else "—"
+        title = f"🏚️ Settlement Removed: {name}"
+        desc = f"**{name}** has been removed from the registry by {actor_mention}."
+        color = 0xED4245
+    else:
+        # Role-sync / emoji changes are not governance-relevant — skip them.
+        title = f"📋 {action}"
+        desc = f"Action by {actor_mention}."
+        color = 0x7289DA
+
+    embed = discord.Embed(title=title, description=desc[:4000], color=color)
+    embed.timestamp = datetime.now(UTC)
+    return embed
