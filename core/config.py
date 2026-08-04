@@ -80,6 +80,20 @@ class Config:
     # 0 = disabled (mutations are still recorded in the DB, just not posted).
     AUDIT_CHANNEL_ID = int(os.getenv("AUDIT_CHANNEL_ID", 0))
 
+    # --- Applications channel (Phase 3.4) ---
+    # Channel that receives an embed for every new /apply submission so council
+    # can review and approve/reject via the buttons. 0 = disabled (applications
+    # are still recorded in the DB, but no Discord notification is sent —
+    # council must use /application list to see them).
+    APPLICATIONS_CHANNEL_ID = int(os.getenv("APPLICATIONS_CHANNEL_ID", 0))
+
+    # --- Governance notifications channel (Phase 3.7) ---
+    # A read-only mirror of registry mutations (citizen add/update/remove,
+    # settlement add/remove) for the WIDER council — a less technical audience
+    # than the audit channel. If this equals AUDIT_CHANNEL_ID or is 0, no
+    # separate governance post is made (the audit channel already covers it).
+    GOVERNANCE_CHANNEL_ID = int(os.getenv("GOVERNANCE_CHANNEL_ID", 0))
+
     # --- Role reconciliation (Phase 2.5) ---
     # Weekly task that checks every citizen's Discord member still holds the
     # citizen/settler/settlement roles and lacks the guest role. Discrepancies

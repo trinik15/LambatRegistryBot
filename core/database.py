@@ -328,6 +328,50 @@ async def init_db():
                         )
                         logger.info("settlements.duchy set to NOT NULL.")
 
+                # --- Phase 3.4: citizen_applications ---
+                # Self-service applications submitted via /apply. Council
+                # approves/rejects via button interactions. An approved
+                # application triggers the normal citizen_add path. Status is
+                # one of: pending / approved / rejected. The applicant's Discord
+                # ID + status are unique so a user can't have two pending apps.
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS citizen_applications (
+                        id BIGSERIAL PRIMARY KEY,
+                        ign CITEXT NOT NULL,
+                        applicant_discord_id TEXT NOT NULL,
+                        settlement CITEXT NOT NULL,
+                        recruiter_discord_id TEXT,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        decided_at TIMESTAMPTZ,
+                        decided_by_discord_id TEXT,
+                        decision_note TEXT
+                    )
+                """)
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_applications_status "
+                    "ON citizen_applications(status)"
+                )
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_applications_ign ON citizen_applications(ign)"
+                )
+                # Prevent a user from having two 'pending' applications at once.
+                # A partial unique index is the cleanest way to express this.
+                await conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_applications_pending_per_user "
+                    "ON citizen_applications(applicant_discord_id) WHERE status = 'pending'"
+                )
+
+                # --- Phase 3.2: trigram index for fast /citizen search ---
+                # pg_trgm enables ILIKE '%query%' to use a GIN index instead of a
+                # full table scan. Essential once the registry grows past a few
+                # hundred citizens. Safe to CREATE IF NOT EXISTS.
+                await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_citizens_ign_trgm "
+                    "ON citizens USING GIN (ign gin_trgm_ops)"
+                )
+
                 # --- Phase 2.4 back-fill: seed guild_emojis from constants ---
                 # Inserts the hardcoded emoji mapping into guild_emojis so the
                 # DB-backed lookup has data on first run. ON CONFLICT DO NOTHING

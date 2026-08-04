@@ -95,6 +95,14 @@ class CitizenRemoveConfirm(discord.ui.View):
             self.ign,
             {"discord_id": self.discord_id, "settlement": self.settlement},
         )
+        # Phase 3.7: also mirror to the governance channel (wider council).
+        await audit.post_to_governance_channel(
+            interaction.client,
+            audit.CITIZEN_REMOVE,
+            str(interaction.user.id),
+            self.ign,
+            {"discord_id": self.discord_id, "settlement": self.settlement},
+        )
 
         # Role removal happens after the DB delete; surface failures honestly.
         role_warning = None
@@ -363,6 +371,18 @@ class CitizenCog(commands.Cog):
                 "recruiters": recruiters,
             },
         )
+        # Phase 3.7: also mirror to the governance channel (wider council).
+        await audit.post_to_governance_channel(
+            self.bot,
+            audit.CITIZEN_ADD,
+            str(interaction.user.id),
+            ign,
+            {
+                "discord_id": str(discord_user.id),
+                "settlement": settlement,
+                "recruiters": recruiters,
+            },
+        )
 
         if role_error or civinfo_warning:
             embed = discord.Embed(
@@ -612,6 +632,14 @@ class CitizenCog(commands.Cog):
 
         # Phase 2.1: mirror to the audit channel (best-effort, post-commit).
         await audit.post_to_channel(
+            self.bot,
+            audit.CITIZEN_UPDATE,
+            str(interaction.user.id),
+            ign,
+            {"changes": {k: list(v) for k, v in changes.items()}},
+        )
+        # Phase 3.7: also mirror to the governance channel (wider council).
+        await audit.post_to_governance_channel(
             self.bot,
             audit.CITIZEN_UPDATE,
             str(interaction.user.id),

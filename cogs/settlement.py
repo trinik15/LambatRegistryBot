@@ -115,6 +115,14 @@ class SettlementCog(commands.Cog):
             None,
             {"name": name, "duchy": duchy.strip()},
         )
+        # Phase 3.7: also mirror to the governance channel (wider council).
+        await audit.post_to_governance_channel(
+            self.bot,
+            audit.SETTLEMENT_ADD,
+            str(interaction.user.id),
+            None,
+            {"name": name, "duchy": duchy.strip()},
+        )
 
         embed = discord.Embed(
             title="✅ Settlement Added",
@@ -177,6 +185,14 @@ class SettlementCog(commands.Cog):
 
         # Phase 2.1: mirror to the audit channel.
         await audit.post_to_channel(
+            self.bot,
+            audit.SETTLEMENT_REMOVE,
+            str(interaction.user.id),
+            None,
+            {"name": name, "duchy": duchy},
+        )
+        # Phase 3.7: also mirror to the governance channel (wider council).
+        await audit.post_to_governance_channel(
             self.bot,
             audit.SETTLEMENT_REMOVE,
             str(interaction.user.id),
