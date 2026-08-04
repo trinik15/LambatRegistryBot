@@ -1,0 +1,104 @@
+# =============================================================================
+# Lambat Registry Bot — Continuous Integration
+#
+# Runs on every push to main and every PR. The job matrix covers Python 3.11
+# (the Dockerfile's base, and the project's minimum supported version) and
+# 3.12 (the current development interpreter). A separate Docker build job
+# validates the container image end-to-end.
+#
+# Gate order (fail fast on the cheapest check):
+#   1. ruff format --check   (formatting — catches the "forgot to format" push)
+#   2. ruff check             (lint — style + bug patterns)
+#   3. mypy                   (types — catches the silent-None class of bugs)
+#   4. pytest                 (behaviour — the honesty branches)
+#
+# No PostgreSQL service container is needed: the test suite exercises pure
+# functions and mocked state machines (see tests/conftest.py for the dummy
+# env-var bootstrap). A real DB integration test would live in a separate job.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs on the same ref when a new commit is pushed — saves
+# CI minutes on rapid push sequences.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: Lint + Type-check + Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel the 3.12 run if 3.11 fails (or vice versa) — both
+      # versions are supported, so both failures are independently actionable.
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          # Cache pip downloads across runs. setup-python auto-detects the
+          # lockfile format; since we use pyproject.toml, it caches based on
+          # the [project.dependencies] + [project.optional-dependencies].
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Editable install pulls in runtime deps + the [dev] extra
+          # (ruff, mypy, pytest, pytest-asyncio) from pyproject.toml.
+          pip install -e ".[dev]"
+
+      - name: Ruff format check
+        # Fails if any file isn't formatted to the ruff standard. Run
+        # `ruff format .` locally to fix.
+        run: ruff format --check .
+
+      - name: Ruff lint
+        # E/F/W = pycodestyle + pyflakes, I = isort, UP = pyupgrade,
+        # B = bugbear, SIM = simplify, C4 = comprehensions.
+        # Run `ruff check --fix .` locally to auto-fix.
+        run: ruff check .
+
+      - name: Mypy
+        # Type-checks core/services/api/tasks/web/utils/main. Cogs are
+        # lenient (discord.py decorator typing). mypy's python_version is
+        # set to 3.12 in pyproject.toml so it can parse numpy's 3.12 stubs;
+        # this is independent of the interpreter running mypy.
+        run: mypy core services api tasks web utils.py main.py
+
+      - name: Pytest
+        # conftest.py sets dummy env vars (DISCORD_TOKEN, DATABASE_URL, etc.)
+        # before any test module imports core.config, so validation passes.
+        # The tests exercise pure functions and mocked state machines — no
+        # live DB or Discord connection is needed.
+        run: pytest -q
+
+  docker-build:
+    name: Docker build smoke test
+    runs-on: ubuntu-latest
+    # Run in parallel with the matrix job — the Docker build validates the
+    # container image (Dockerfile + requirements.txt + .dockerignore) which
+    # is independent of the Python lint/type/test results.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        # Builds the production image to catch Dockerfile / requirements
+        # regressions (e.g. a dep that installs on the venv but not in the
+        # python:3.11-slim container). Doesn't run the bot — that needs
+        # DISCORD_TOKEN + DATABASE_URL.
+        run: docker build -t lambat-registry-bot:ci .
