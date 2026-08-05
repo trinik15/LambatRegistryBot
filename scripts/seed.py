@@ -40,6 +40,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 import asyncpg  # noqa: E402
 
+from scripts._env_loader import load_env_file  # noqa: E402
+
 # --- Seed data ------------------------------------------------------------
 # Five settlements spanning four duchies + the capital. Matches the canonical
 # Lambat geography from core/constants.py so /settlement list groups them
@@ -108,20 +110,10 @@ CITIZENS: list[dict[str, object]] = [
 def _load_env_file() -> None:
     """Load .env from the repo root into os.environ (without python-dotenv).
 
-    Only sets variables that aren't already in the environment, so explicit
-    `DATABASE_URL=...` on the command line takes precedence.
+    Delegates to scripts._env_loader.load_env_file which correctly handles
+    inline comments (``KEY=value  # comment``) and quoted values.
     """
-    env_path = _REPO_ROOT / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        os.environ.setdefault(key, value)
+    load_env_file()
 
 
 async def _seed(reset: bool) -> None:

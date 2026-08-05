@@ -62,8 +62,15 @@ services:
     volumes:
       # Persist backups outside the container so they survive `up --build`.
       - ./backups:/app/backups
-      # Persist logs to the host for easy inspection.
-      - ./lambat_bot.log:/app/lambat_bot.log
+      # NOTE: We intentionally do NOT mount lambat_bot.log as a file. When the
+      # host file doesn't exist, Docker creates it as a DIRECTORY (not a file),
+      # which breaks the bot's file logger. Instead, logs go to stdout and are
+      # captured by `docker compose logs bot`. To persist logs to the host,
+      # mount a directory and set LOG_FILE in .env:
+      #   volumes:
+      #     - ./logs:/app/logs
+      #   environment:
+      #     LOG_FILE: logs/lambat_bot.log
 
 volumes:
   lambat_pgdata:
