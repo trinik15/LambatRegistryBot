@@ -121,6 +121,81 @@ that case, you can run `/sync` as the owner to force a re-sync).
 
 ---
 
+## Quick E2E testing
+
+The `scripts/` directory contains four tools that turn the 6-step manual
+testing flow into ~5 minutes of work. Run them in this order:
+
+### 1. Pre-flight checks (before starting the bot)
+
+Validates that your `.env` is correct, the bot can reach your guild, the
+role hierarchy is right, channels are visible, and slash commands are synced —
+all without launching the full gateway.
+
+```bash
+python scripts/preflight.py
+```
+
+Catches the 5 most common "why isn't my bot working" mistakes in <5 seconds.
+See `python scripts/preflight.py --help` for skip options.
+
+### 2. Bring up Postgres + bot together
+
+```bash
+docker compose up --build
+```
+
+This starts Postgres 16 (with a healthcheck) and the bot, wired together. The
+bot's `DATABASE_URL` is overridden to point at the compose `db` service, so
+you don't need to set it in `.env`. Logs stream to your terminal; look for
+`Discord gateway: READY` + `Synced N commands`.
+
+To wipe the DB and start fresh: `docker compose down -v`.
+
+### 3. Smoke-check the HTTP endpoints
+
+In a second terminal, while the bot is running:
+
+```bash
+./scripts/smoke_check.sh
+```
+
+Verifies `/healthz` returns 200 with `status=ok, gateway=true, db=true`, and
+`/metrics` exposes all 7 required Prometheus metric names.
+
+### 4. Seed test data
+
+```bash
+python scripts/seed.py
+```
+
+Idempotently inserts 5 settlements + 6 test citizens (with fake Discord IDs)
+so read commands like `/citizen list`, `/report census`, and
+`/settlement info` have something to show immediately. Re-run safely; pass
+`--reset` to wipe first. (This script does NOT touch Discord — use
+`/citizen add` in Discord to test the role-assignment path with real users.)
+
+### 5. Walk the command checklist
+
+Open [`scripts/E2E_CHECKLIST.md`](scripts/E2E_CHECKLIST.md) and tick through
+every slash command, grouped by phase. Covers all 25+ commands including
+Phase 3's CSV import, `/citizen search`, `/settlement info`, self-service
+`/apply`, activity charts, governance notifications, and the CivMC
+online-now list.
+
+### One-shot test loop
+
+```bash
+python scripts/preflight.py     && \
+docker compose up --build -d    && \
+sleep 8                         && \
+./scripts/smoke_check.sh        && \
+python scripts/seed.py          && \
+echo "✅ Ready for Discord E2E — open scripts/E2E_CHECKLIST.md"
+```
+
+---
+
 ## CivInfo API key (activity tracking)
 
 The bot uses [CivInfo](https://civinfo.net) to check when citizens last logged
@@ -205,6 +280,12 @@ cogs/
 web/
   health.py              — Keep-alive + /healthz (honest liveness) + /metrics (Prometheus)
 utils.py                 — PaginationView, date parsing/formatting helpers
+scripts/                 — E2E testing toolkit (see "Quick E2E testing" above)
+  preflight.py           — Pre-launch checks: token, guild, role hierarchy, channels, sync
+  seed.py                — Idempotent test-data seeder (5 settlements + 6 citizens)
+  smoke_check.sh         — /healthz + /metrics HTTP smoke check
+  E2E_CHECKLIST.md       — 25+ command walk-through, grouped by phase
+docker-compose.yml       — Postgres 16 + bot, wired together with healthcheck
 ```
 
 ---
