@@ -1,0 +1,70 @@
+# =============================================================================
+# Lambat Registry Bot — local end-to-end testing stack.
+#
+# Brings up Postgres + the bot together so you can do a full E2E test in one
+# command. The Postgres data is persisted to a named volume so re-runs keep
+# their data; pass `--renew-anon-volumes` (or `docker compose down -v`) to wipe.
+#
+# Usage:
+#   1. cp .env.example .env  &&  fill in DISCORD_TOKEN / GUILD_ID / role IDs
+#      (DATABASE_URL is overridden below to point at the `db` service — you do
+#      NOT need to set it in .env for docker-compose runs).
+#   2. docker compose up --build
+#   3. Watch the logs: "Discord gateway: READY" + "Synced N commands".
+#   4. Open Discord, run /help in your test server.
+#   5. Stop with Ctrl-C. `docker compose down -v` wipes the DB.
+#
+# The bot's /healthz + /metrics endpoints are exposed on http://localhost:10000
+# (or whatever PORT you set in .env). Run scripts/smoke_check.sh to verify.
+# =============================================================================
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: lambat-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lambat
+      POSTGRES_PASSWORD: lambat_dev_password
+      POSTGRES_DB: lambat
+    ports:
+      - "5432:5432"
+    volumes:
+      - lambat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready checks the server accepts connections, not just that the
+      # process is alive. This is what `depends_on.condition: service_healthy`
+      # uses to gate the bot startup.
+      test: ["CMD-SHELL", "pg_isready -U lambat -d lambat"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  bot:
+    build: .
+    container_name: lambat-bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override DATABASE_URL so the bot connects to the compose `db` service
+      # instead of whatever is in .env. The bot's core/config.py reads this on
+      # import; the env_file value is overridden by this explicit mapping.
+      DATABASE_URL: postgresql://lambat:lambat_dev_password@db:5432/lambat
+      # Render-style hosts inject PORT; default to 10000 to match the README.
+      PORT: "10000"
+    ports:
+      - "10000:10000"
+    volumes:
+      # Persist backups outside the container so they survive `up --build`.
+      - ./backups:/app/backups
+      # Persist logs to the host for easy inspection.
+      - ./lambat_bot.log:/app/lambat_bot.log
+
+volumes:
+  lambat_pgdata:
+    driver: local
