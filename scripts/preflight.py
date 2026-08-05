@@ -37,17 +37,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts._env_loader import load_env_file  # noqa: E402
+
 
 def _load_env_file() -> None:
-    env_path = _REPO_ROOT / ".env"
-    if not env_path.exists():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    """Load .env, correctly handling inline comments + quoted values."""
+    load_env_file()
 
 
 # ANSI colours — kept simple so the output reads cleanly on any terminal.
@@ -68,6 +63,38 @@ def _env_int(name: str) -> int:
         return int(raw)
     except ValueError:
         return 0
+
+
+def _safe_user_id(client: discord.Client) -> int | None:
+    """Safely extract ``client.user.id``, handling discord.py 2.7.1's race.
+
+    In discord.py 2.7.1, ``client.user`` returns ``_MissingSentinel`` (a truthy
+    singleton with no ``.id`` attribute) for a brief window after ``on_ready``
+    fires, before the IDENTIFY session fully populates the user object. A naive
+    ``if client.user:`` check passes (sentinel is truthy), then ``.id`` raises
+    ``AttributeError: '_MissingSentinel'``. This helper returns ``None`` instead
+    of crashing, so callers can retry.
+    """
+    user = client.user
+    if user is None:
+        return None
+    # _MissingSentinel has no .id attribute; a real ClientUser does.
+    return getattr(user, "id", None)
+
+
+async def _resolve_user_id(client: discord.Client, timeout_s: float = 2.0) -> int | None:
+    """Poll ``client.user`` until it's a real user (or timeout).
+
+    Works around the discord.py 2.7.1 race where ``on_ready`` fires before
+    ``client.user`` is populated. Polls every 100ms for up to ``timeout_s``.
+    """
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    while asyncio.get_event_loop().time() < deadline:
+        uid = _safe_user_id(client)
+        if uid is not None:
+            return uid
+        await asyncio.sleep(0.1)
+    return None
 
 
 async def run(skips: set[str]) -> int:
@@ -92,8 +119,14 @@ async def run(skips: set[str]) -> int:
 
         @client.event
         async def on_ready():
-            assert client.user is not None  # on_ready guarantees this
-            print(f"{_PASS}Token valid. Bot user: {client.user} (id={client.user.id}).")
+            # discord.py 2.7.1: client.user may be _MissingSentinel briefly
+            # after on_ready. Resolve it with a retry before printing.
+            uid = await _resolve_user_id(client, timeout_s=2.0)
+            if uid is None:
+                print(f"{_FAIL}Token accepted but client.user never resolved (discord.py race).")
+                print("       Try re-running; this is transient.")
+            else:
+                print(f"{_PASS}Token valid. Bot user ID: {uid}.")
             await client.close()
 
         token_ok = True
@@ -138,6 +171,8 @@ async def run(skips: set[str]) -> int:
 
         @client2.event
         async def on_ready():
+            # Don't resolve user here — _run_guild_checks will do it with its
+            # own retry loop. Just signal that the gateway is up.
             ready.set()
 
         # We'll run all the remaining checks inside this client's context.
@@ -173,6 +208,15 @@ async def _run_guild_checks(
     skips: set[str],
 ) -> None:
     """Runs checks 2b-5 inside a connected discord.Client."""
+    # discord.py 2.7.1: resolve client.user.id with a retry, because
+    # on_ready fires before the user object is fully populated.
+    bot_user_id = await _resolve_user_id(client, timeout_s=2.0)
+    if bot_user_id is None:
+        print(f"{_FAIL}Could not resolve bot user ID (discord.py 2.7.1 race condition).")
+        print("       This is transient — re-run preflight.py.")
+        failures.append("client.user never resolved")
+        return
+
     guild = client.get_guild(guild_id)
     if guild is None:
         # Fall back to an HTTP fetch — sometimes the cache isn't populated yet
@@ -204,10 +248,10 @@ async def _run_guild_checks(
     else:
         # --- Check 3: role hierarchy ---
         print(f"\n{BOLD}3. Role hierarchy{RESET}")
-        me = guild.get_member(client.user.id) if client.user else None
+        me = guild.get_member(bot_user_id)
         if me is None:
             try:
-                me = await guild.fetch_member(client.user.id)  # type: ignore[union-attr]
+                me = await guild.fetch_member(bot_user_id)
             except discord.HTTPException:
                 me = None
         if me is None:
@@ -268,9 +312,18 @@ async def _run_guild_checks(
 
                 if isinstance(ch, (TextChannel, Thread, VoiceChannel)):
                     # Check the bot has Send Messages permission.
-                    me = ch.guild.get_member(client.user.id) if client.user else None
+                    me = ch.guild.get_member(bot_user_id)
                     if me is None:
-                        me = await ch.guild.fetch_member(client.user.id)  # type: ignore[union-attr]
+                        try:
+                            me = await ch.guild.fetch_member(bot_user_id)
+                        except discord.HTTPException:
+                            me = None
+                    if me is None:
+                        print(
+                            f"{_FAIL}{var_name}={cid} → #{ch.name}. Bot member not found in guild."
+                        )
+                        failures.append(f"{var_name} bot member not found")
+                        continue
                     perms = ch.permissions_for(me)
                     if perms.send_messages:
                         print(
@@ -294,8 +347,9 @@ async def _run_guild_checks(
     else:
         print(f"\n{BOLD}5. Command sync{RESET}")
         # Fetch the guild's registered commands via the HTTP API.
+        # Use bot_user_id (already resolved) instead of client.user.id.
         try:
-            existing = await client.http.get_guild_commands(client.user.id, guild_id)  # type: ignore[union-attr]
+            existing = await client.http.get_guild_commands(bot_user_id, guild_id)
             if not existing:
                 print(f"{_WARN}No slash commands synced to this guild yet.")
                 print("       Start the bot once (python main.py) to trigger the initial sync,")

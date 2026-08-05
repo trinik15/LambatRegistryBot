@@ -1,5 +1,5 @@
 # =============================================================================
-# Lambat Registry Bot — HTTP smoke check (native PowerShell version).
+# Lambat Registry Bot - HTTP smoke check (native PowerShell version).
 #
 # PowerShell equivalent of smoke_check.sh. Verifies:
 #   /healthz  -> 200, JSON with status=ok, gateway=true, db=true
@@ -14,6 +14,9 @@
 #   $env:BASE_URL="http://1.2.3.4:10000"; .\scripts\smoke_check.ps1
 #
 # Exit codes: 0 = all passed, 1 = at least one check failed.
+#
+# NOTE: This file is intentionally ASCII-only (no Unicode emoji/dashes) for
+# maximum compatibility with Windows PowerShell 5.1 default encoding.
 # =============================================================================
 
 # Stop on first error in our own cmdlets, but we handle HTTP errors explicitly.
@@ -25,7 +28,7 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     exit 1
 }
 
-# Resolve BASE_URL — $env:PORT takes precedence, then $env:BASE_URL, then default.
+# Resolve BASE_URL - $env:PORT takes precedence, then $env:BASE_URL, then default.
 if ($env:BASE_URL) {
     $baseUrl = $env:BASE_URL
 } else {
@@ -35,9 +38,9 @@ if ($env:BASE_URL) {
 
 $fail = 0
 
-function Write-Pass($msg) { Write-Host "  $('✓') $msg" -ForegroundColor Green }
-function Write-Fail($msg) { Write-Host "  $('✗') $msg" -ForegroundColor Red }
-function Write-Warn($msg) { Write-Host "  $('⚠') $msg" -ForegroundColor Yellow }
+function Write-Pass($msg) { Write-Host "  [OK] $msg" -ForegroundColor Green }
+function Write-Fail($msg) { Write-Host "  [FAIL] $msg" -ForegroundColor Red }
+function Write-Warn($msg) { Write-Host "  [WARN] $msg" -ForegroundColor Yellow }
 function Write-Bold($msg) { Write-Host $msg -ForegroundColor White }
 
 Write-Host ""
@@ -137,10 +140,10 @@ Write-Host ""
 # --- Summary ------------------------------------------------------------------
 Write-Host ("=" * 60)
 if ($fail -ne 0) {
-    Write-Host "✗ Smoke check FAILED - see above." -ForegroundColor Red
+    Write-Host "[FAIL] Smoke check FAILED - see above." -ForegroundColor Red
     exit 1
 } else {
-    Write-Host "✓ All smoke checks passed." -ForegroundColor Green
+    Write-Host "[OK] All smoke checks passed." -ForegroundColor Green
     Write-Host ""
     Write-Host "Next: open Discord and run /help in your test server."
     exit 0
