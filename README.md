@@ -157,7 +157,8 @@ To wipe the DB and start fresh: `docker compose down -v`.
 In a second terminal, while the bot is running:
 
 ```bash
-./scripts/smoke_check.sh
+./scripts/smoke_check.sh          # Mac / Linux / Git Bash
+.\scripts\smoke_check.ps1         # Windows PowerShell
 ```
 
 Verifies `/healthz` returns 200 with `status=ok, gateway=true, db=true`, and
@@ -186,12 +187,24 @@ online-now list.
 ### One-shot test loop
 
 ```bash
+# Mac / Linux / Git Bash
 python scripts/preflight.py     && \
 docker compose up --build -d    && \
 sleep 8                         && \
 ./scripts/smoke_check.sh        && \
 python scripts/seed.py          && \
 echo "✅ Ready for Discord E2E — open scripts/E2E_CHECKLIST.md"
+```
+
+```powershell
+# Windows PowerShell
+python scripts\preflight.py
+if ($LASTEXITCODE -eq 0) {
+    docker compose up --build -d
+    Start-Sleep -Seconds 8
+    .\scripts\smoke_check.ps1
+    if ($LASTEXITCODE -eq 0) { python scripts\seed.py }
+}
 ```
 
 ---
@@ -283,7 +296,8 @@ utils.py                 — PaginationView, date parsing/formatting helpers
 scripts/                 — E2E testing toolkit (see "Quick E2E testing" above)
   preflight.py           — Pre-launch checks: token, guild, role hierarchy, channels, sync
   seed.py                — Idempotent test-data seeder (5 settlements + 6 citizens)
-  smoke_check.sh         — /healthz + /metrics HTTP smoke check
+  smoke_check.sh         — /healthz + /metrics HTTP smoke check (Mac/Linux/Git Bash)
+  smoke_check.ps1        — Same, native Windows PowerShell version
   E2E_CHECKLIST.md       — 25+ command walk-through, grouped by phase
 docker-compose.yml       — Postgres 16 + bot, wired together with healthcheck
 ```
