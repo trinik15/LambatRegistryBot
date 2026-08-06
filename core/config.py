@@ -110,6 +110,13 @@ class Config:
     # is a read-only mirror of the audit_log table for the wider council.
     # 0 = disabled (mutations are still recorded in the DB, just not posted).
     AUDIT_CHANNEL_ID = int(os.getenv("AUDIT_CHANNEL_ID", 0))
+    # ROADMAP §6.2 (open decision, now resolved as opt-in): rolling retention for
+    # the audit_log table. 0 = keep forever (the default, matching prior
+    # behaviour — text is cheap). Set e.g. 730 for a 2-year rolling window: a
+    # nightly task (tasks/audit_retention.py) DELETEs rows older than this many
+    # days and emits an audit.prune entry recording how many were removed, so
+    # the policy itself is visible in /audit search.
+    AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", 0))
 
     # --- Applications channel (Phase 3.4) ---
     # Channel that receives an embed for every new /apply submission so council
@@ -242,6 +249,11 @@ class Config:
             raise ValueError("ROLE_SYNC_WEEKLY_DAY must be 0-6 (Mon-Sun).")
         if not 0 <= cls.ROLE_SYNC_WEEKLY_HOUR <= 23:
             raise ValueError("ROLE_SYNC_WEEKLY_HOUR must be 0-23 (UTC).")
+
+        # Validate audit retention. 0 = disabled (keep forever); any positive
+        # int enables the nightly prune. Negative values are meaningless.
+        if cls.AUDIT_RETENTION_DAYS < 0:
+            raise ValueError("AUDIT_RETENTION_DAYS must be >= 0 (0 = keep forever).")
 
         logger.info("Configuration validated successfully.")
 
