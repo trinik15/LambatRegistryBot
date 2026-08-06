@@ -2,8 +2,12 @@
 # Lambat Registry Bot - HTTP smoke check (native PowerShell version).
 #
 # PowerShell equivalent of smoke_check.sh. Verifies:
-#   /healthz  -> 200, JSON with status=ok, gateway=true, db=true
+#   /healthz  -> 200, JSON with status=ok, discord_gateway=true, database=true
 #   /metrics  -> 200, Prometheus text with all expected metric names
+#
+# NOTE: web/health.py returns the fields: status, discord_gateway, database,
+# civinfo_ok, timestamp. Older versions returned "gateway"/"db" -- this script
+# now checks the real field names.
 #
 # Does NOT touch Discord. Use this AFTER starting the bot (docker compose up
 # or python main.py) to confirm the process is live and the DB is reachable.
@@ -73,11 +77,18 @@ if ($response.StatusCode -ne 200) {
     }
 
     if ($health) {
-        if ($health.status -eq "ok" -and $health.gateway -eq $true -and $health.db -eq $true) {
-            Write-Pass "/healthz 200 - status=ok, gateway=true, db=true"
+        # web/health.py returns: status, discord_gateway, database, civinfo_ok,
+        # timestamp. We gate on status + discord_gateway + database (CivInfo is
+        # a soft-degraded third-party dep, not gating -- see health.py header).
+        $gw = $health.discord_gateway
+        $db = $health.database
+        $civ = $health.civinfo_ok
+        if ($health.status -eq "ok" -and $gw -eq $true -and $db -eq $true) {
+            $civTag = if ($civ -eq $true) { "civinfo_ok" } else { "civinfo DEGRADED" }
+            Write-Pass "/healthz 200 - status=ok, gateway=true, db=true ($civTag)"
         } else {
             Write-Fail "/healthz returned 200 but unhealthy state:"
-            Write-Host "    status=$($health.status) gateway=$($health.gateway) db=$($health.db)" -ForegroundColor Red
+            Write-Host "    status=$($health.status) discord_gateway=$gw database=$db civinfo_ok=$civ" -ForegroundColor Red
             Write-Host "    Body: $($response.Content)" -ForegroundColor Red
             $fail = 1
         }
