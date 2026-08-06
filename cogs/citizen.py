@@ -1139,12 +1139,26 @@ async def _search_citizens(query: str) -> list[dict]:
     Uses ILIKE for partial case-insensitive matching (the trigram index
     added in Phase 3.2 makes this fast). When the query looks like a Discord
     ID (all digits), also matches discord_id and recruiter_discord_id.
+
+    .. note::
+
+        The Discord-ID path queries **our own** ``citizens.discord_id``
+        column (populated at ``/citizen add`` time), NOT CivInfo. CivInfo's
+        ``mc-accounts/full`` endpoint does not expose Discord UIDs — the
+        Discord↔MC link lives in Gjum's Kira bridge (``users`` table), which
+        is not exposed via any civinfo API endpoint (confirmed 2025-08 via
+        ``civmc.netlify.app`` bundle analysis + ``Gjum/Kira`` source; see
+        ``ROADMAP.md`` §8.1 and ``README.md`` "Why can't we look up
+        citizens by Discord UID?"). Don't try to resolve an unknown Discord
+        ID via CivInfo — it can't be done. This path only finds citizens
+        already registered with us.
     """
     pattern = f"%{query}%"
     is_numeric = query.isdigit()
 
     if is_numeric:
-        # Search IGN + settlement + discord_id + recruiter junction.
+        # Discord-ID path: queries citizens.discord_id + recruiters junction.
+        # CivInfo cannot resolve a Discord UID → IGN (see docstring above).
         rows = await db.execute_query(
             "SELECT DISTINCT c.ign, c.discord_id, c.settlement, c.join_date "
             "FROM citizens c "

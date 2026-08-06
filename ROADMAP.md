@@ -366,8 +366,75 @@ Phase 0 (de-risk)   ──►  Phase 1 (quality)  ──►  Phase 2 (data model
 - **Does not switch databases.** PostgreSQL + asyncpg is correct for this workload; no move to SQLite/Redis/Mongo.
 - **Does not add a web frontend as the primary surface.** Discord is where the users are; a web dashboard (Phase 5) is optional and read-only.
 - **Does not change the deployment model.** Single-process, single-guild, free-tier-host-friendly remains the target.
+- **Does not pursue Discord-UID lookup via CivInfo.** Confirmed impossible
+  (see §8 below) — Kira's `users.discord_id` table is not exposed via any
+  civinfo API endpoint. Don't re-investigate; use the bot's own
+  `citizens.discord_id` column.
+
+---
+
+## 8. Research findings (confirmed limitations)
+
+Findings confirmed during the standalone CivInfo API improvement plan
+(2025-08). Recorded here so future contributors don't re-investigate
+closed questions.
+
+### 8.1 CivInfo API does not expose Discord UIDs
+
+**Confirmed 2025-08** by dissecting the `civmc.netlify.app` frontend JS
+bundle and reading the `Gjum/Kira` source.
+
+- The 4 endpoints on `api.civinfo.net` (`mc-accounts/full`,
+  `mc-sessions/all`, `mc-server-status/{server}/{period}`, FactoryMod
+  config SPA) return Minecraft data only — IGN, UUID, login timestamps,
+  player counts. None return a `discord_id` field.
+- The Discord↔Minecraft link lives in Kira (a separate bridge service with
+  its own `users` table: `discord_id ↔ uuid ↔ mc_name`), populated when a
+  CivMC player runs `/discord link` in-game. Kira exposes this data
+  **in-game** (`/discord whois <ign>`) and via a CivMC Discord bot, but
+  **not via any public REST/WebSocket API** that a third-party bot like
+  ours can call.
+- The `civinfo-version: git:<hash>` header Gjum's frontend sends is for
+  analytics/allowlisting, not for unlocking a hidden Discord-UID endpoint.
+
+**Implication for the registry:** the bot's own `citizens.discord_id`
+column (populated at `/citizen add` time) is the only Discord→IGN lookup
+available. `/citizen search <discord_id>` queries this column, NOT
+CivInfo. See `README.md` "Why can't we look up citizens by Discord UID?"
+for the user-facing version.
+
+**If this ever changes:** Gjum was asked once (via
+`minecraft.gjum@gmail.com`) to expose Kira's `users` table via the civinfo
+API and declined as out of scope. Re-asking only makes sense if Kira adds a
+public endpoint — watch the `Gjum/Kira` repo for a `REST`/`HTTP` adapter.
+
+### 8.2 FactoryMod has no API — it's a static SPA
+
+`factorymod.civinfo.net` is a client-side SPA that fetches
+`config.yml` directly from `github.com/CivMC/Civ`. There is no server-side
+API to call. The bot's `/factory` commands (Phase B / WS-6) replicate the
+SPA's data source (the same GitHub raw URL) and cache the parsed YAML for
+1 hour. **Don't try to "fix" this by hitting `factorymod.civinfo.net`** —
+there's nothing to hit.
+
+### 8.3 `duckdns` API is permanently dead
+
+The `duckdns.org` API (previously used by some CivMC-adjacent tooling for
+dynamic DNS) returns TCP timeouts as of 2025-08. Any external documentation
+referencing it is stale. Don't use it.
+
+### 8.4 `mc-sessions/all` is superseded by `mc-accounts/full`
+
+The legacy `mc-sessions/all` endpoint returns parallel arrays of
+`loginTimestamps` + `logoutTimestamps`. The new `mc-accounts/full` endpoint
+returns a single account object with `first_joined`, `last_login`, and
+`last_logout` as direct fields — strictly more data in the same number of
+calls. The bot switched to `mc-accounts/full` in Phase A (WS-1, commit
+`2600f92`). The old endpoint is kept as a fallback only if Gjum ever
+deprecates `mc-accounts/full` (no signal of this as of 2025-08).
 
 ---
 
 *Roadmap authored from a full line-by-line read of commit `38e6e18` (81 commits,
-~3,694 lines of Python). Every file reference above was verified against the source.*
+~3,694 lines of Python). Every file reference above was verified against the source.
+Section 8 added 2025-08 alongside the CivInfo API improvement plan (Phases A–C).*
