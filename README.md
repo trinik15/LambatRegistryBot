@@ -272,6 +272,45 @@ same: fetch the 482 KB YAML once per hour, cache it, and serve all 61 factories
 - `/factory recipe <id>` — inputs, outputs (with chances for RANDOM type),
   and production time.
 
+### Why can't we look up citizens by Discord UID?
+
+**Short answer:** CivInfo doesn't expose Discord UIDs — only Minecraft IGNs,
+UUIDs, and login timestamps. The Discord↔Minecraft link lives in Gjum's Kira
+bridge (a separate service with its own `users` table: `discord_id ↔ uuid ↔
+mc_name`), and **Kira's table is not exposed via any civinfo API endpoint**.
+
+**Long answer** (confirmed 2025-08 by dissecting the `civmc.netlify.app`
+frontend JS bundle and reading the `Gjum/Kira` source):
+
+- The 4 endpoints on `api.civinfo.net` are: `mc-accounts/full`,
+  `mc-sessions/all`, `mc-server-status/{server}/{period}`, and the FactoryMod
+  config SPA. None of them return a `discord_id` field — not even
+  `mc-accounts/full`, which returns `uuid`, `mc_name`, `first_joined`,
+  `last_login`, `last_logout` only.
+- The `civinfo-version: git:<hash>` header Gjum's frontend sends is for
+  analytics/allowlisting, not for unlocking a hidden Discord-UID endpoint.
+- The Kira bridge (`users.discord_id`) is populated by the in-game Kira
+  plugin when a player runs `/discord link` on CivMC. Kira exposes that data
+  to **Minecraft players in-game** (via `/discord whois <ign>`) and to the
+  CivMC Discord via a bot command — but **not to third-party bots** via an
+  HTTP API. There is no public Kira REST/WebSocket endpoint we can call.
+
+**What this means for the bot:**
+
+- `/citizen search <discord_id>` queries **our own** `citizens.discord_id`
+  column (populated at `/citizen add` time), NOT civinfo. It only finds
+  citizens that have already been registered with us.
+- `/citizen add <ign> <@discord_user>` requires the Discord user to be
+  passed explicitly — we cannot derive it from the IGN via CivInfo.
+- The `recruiters.recruiter_discord_id` junction is also our own data, not
+  a CivInfo lookup.
+
+**Don't pursue this.** If you need a Discord↔MC link that's authoritative
+across all of CivMC (not just Lambat's registry), the only paths are
+(1) running a Kira instance ourselves (heavy, requires a CivMC plugin slot),
+or (2) asking Gjum to expose Kira's `users` table via the civinfo API (asked
+once via `minecraft.gjum@gmail.com`, declined as out of scope).
+
 ---
 
 ## Deployment
