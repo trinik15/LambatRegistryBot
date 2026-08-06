@@ -1,8 +1,61 @@
 # Lambat Registry Bot — End-to-End Test Checklist
 
-A walk-through of every Phase 0–3 feature against a real Discord + real
+A walk-through of every Phase 0–4 feature against a real Discord + real
 Postgres. Run this AFTER `python scripts/preflight.py` passes and the bot is
 running (`python main.py` or `docker compose up`).
+
+---
+
+## Automated harness (run this FIRST)
+
+Before doing the manual Discord walk-through below, run the automated Windows
+harness — it covers everything that does NOT need a human clicking in Discord:
+
+```powershell
+# One-time: install the dev tooling into your Python.
+pip install -e ".[dev]"
+
+# Full run (lint + types + tests + docker + seed + smoke + DB verify + command
+# sync audit). Writes e2e_report.md + e2e_report.txt.
+.\scripts\run_e2e.ps1
+
+# Leave the bot running afterwards so you can do the manual /command checklist:
+.\scripts\run_e2e.ps1 -KeepRunning
+
+# No Discord token yet? Skip the Discord stages:
+.\scripts\run_e2e.ps1 -SkipDiscord
+
+# Just the fast local checks (no docker):
+.\scripts\run_e2e.ps1 -SkipDocker
+
+# Re-run a single stage:
+.\scripts\run_e2e.ps1 -Stages S3
+```
+
+The harness runs 15 stages (S0–S14) and writes a structured markdown report.
+**Only after the automated report is all-green should you start the manual
+Discord checklist below** (the manual steps exercise the slash commands the
+automated harness cannot click).
+
+| Stage | What it checks | Needs |
+|-------|----------------|-------|
+| S0 | python / docker / git / .env present | — |
+| S1 | `ruff format --check .` | python + deps |
+| S2 | `ruff check .` | python + deps |
+| S3 | `mypy` (28 source files) | python + deps |
+| S4 | `pytest` (294 tests) | python + deps |
+| S5 | `docker compose build` | Docker Desktop |
+| S6 | `docker compose up -d` | Docker Desktop |
+| S7 | poll `/healthz` until healthy (≤2 min) | bot running |
+| S8 | `preflight.py` — token/guild/role/channel | DISCORD_TOKEN |
+| S9 | `seed.py` — 5 settlements + 6 citizens | DB up |
+| S10 | `smoke_check.ps1` — /healthz + /metrics | bot running |
+| S11 | `db_verify.py --check-seed` — schema + seed | DB up |
+| S12 | `command_audit.py` — all 13 slash cmds synced | DISCORD_TOKEN |
+| S13 | capture last 200 lines of bot logs | Docker |
+| S14 | `docker compose down` (unless `-KeepRunning`) | Docker |
+
+---
 
 **How to use:** tick each box as the command succeeds. If anything fails,
 check `lambat_bot.log` first — every failure is logged at WARNING/ERROR with
@@ -37,10 +90,10 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 
 - [ ] `ruff format --check .` → clean
 - [ ] `ruff check .` → clean
-- [ ] `mypy` (no args) → "Success: no issues found in 26 source files"
-- [ ] `pytest` → 168 passed
+- [ ] `mypy` (no args) → "Success: no issues found in 28 source files"
+- [ ] `pytest` → 294 passed
 - [ ] Bot log lines are structured (`[info     ]` tag from structlog)
-- [ ] `/metrics` exposes all 7 mandated metrics (smoke_check.sh verified this)
+- [ ] `/metrics` exposes all 7 mandated metrics (smoke_check.ps1 verified this)
 
 ---
 
@@ -109,6 +162,40 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 - [ ] Other online players listed below
 - [ ] If CivMC is empty, the embed says so (no crash)
 - [ ] If mcsrvstat is unreachable, the embed degrades gracefully (no 500)
+
+---
+
+## Phase 4 — Hardening & ops polish
+
+### 4.1 Graceful shutdown (SIGTERM)
+- [ ] `docker compose stop bot` → logs show an orderly close (loops cancelled, DB pool released, gateway closed) within `SHUTDOWN_GRACE_SECONDS`
+- [ ] No `SIGKILL` warning in the docker logs (i.e. shutdown finished within the grace window)
+
+### 4.2 Dockerfile HEALTHCHECK
+- [ ] `docker inspect lambat-bot --format '{{.State.Health.Status}}'` → `healthy`
+- [ ] `docker inspect lambat-bot --format '{{json .State.Health.Log}}'` → recent entries show exit 0
+
+### 4.3 Rate-limit-aware bulk role ops
+- [ ] Bulk role sync (ROLE_SYNC_AUTO=true + a citizen with a missing role) completes without hitting Discord's 429; the `rate_limit_guard` log lines show spaced retries if any
+
+### 4.4 Matplotlib Filipino glyph font
+- [ ] `/report trends` → PNG renders without tofu boxes (DejaVu Sans covers Latin + common glyphs)
+
+### 4.5 i18n (LOCALE=en default; fil stretch)
+- [ ] With `LOCALE=en`, `/help` shows English strings
+- [ ] Set `LOCALE=fil`, restart, `/help` → Filipino /help embed (other strings fall back to en — documented)
+
+### 4.6 Snapshot annotations + /snapshot cog
+- [ ] `/snapshot annotate date:<a monthly snapshot date> note:Test annotation` → "Snapshot annotated"
+- [ ] `/snapshot list` → shows the annotated snapshot with its note
+- [ ] `/snapshot clear date:<same>` → note removed
+- [ ] `/report trends` → annotated months show the note text on the chart
+
+### Phase B (CivInfo plan) — /server trends + /factory
+- [ ] `/server trends period:Last 24 hours` → embed with a 24h player-count sparkline/summary
+- [ ] `/factory info <factory>` → setup cost + recipes
+- [ ] `/factory list` → all FactoryMod factories
+- [ ] `/factory recipe <recipe>` → inputs + outputs
 
 ---
 
