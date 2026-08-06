@@ -253,9 +253,7 @@ class ServerCog(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
-        history = await civinfo_api.get_server_status_history(
-            period_val, self.bot.http_session
-        )
+        history = await civinfo_api.get_server_status_history(period_val, self.bot.http_session)
 
         if not history:
             embed = discord.Embed(
