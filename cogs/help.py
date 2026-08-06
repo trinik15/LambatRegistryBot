@@ -5,6 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core.config import Config
+from core.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -15,72 +16,71 @@ class HelpCog(commands.Cog):
 
     @app_commands.command(name="help", description="Show help and available commands")
     async def help(self, interaction: discord.Interaction):
+        # Phase 4.5: all user-facing strings are looked up via tr(), which
+        # reads from locales/{en,fil}.json. The default lang is Config.LOCALE
+        # (env var LOCALE); individual calls can override, but /help uses the
+        # configured default so a Filipino-themed deployment just sets
+        # LOCALE=fil and gets the translated embed.
         embed = discord.Embed(
-            title="📚 Lambat National Registry",
-            description=(
-                "Official bot for tracking citizens, settlements, and population "
-                "trends for the Lambat nation on CivMC."
-            ),
+            title=tr("help.title"),
+            description=tr("help.description"),
             color=0x5865F2,
         )
         embed.add_field(
-            name="👤 Citizen Commands",
+            name=tr("help.section.citizen"),
             value=(
-                "`/citizen add` – Register a new citizen *(Council only)*\n"
-                "`/citizen update` – Update citizen info *(Council only)*\n"
-                "`/citizen remove` – Remove a citizen *(Council only)*\n"
-                "`/citizen list` – List all citizens by settlement\n"
-                "`/citizen dossier` – View a citizen's full dossier"
+                f"{tr('help.citizen.add')}\n"
+                f"{tr('help.citizen.update')}\n"
+                f"{tr('help.citizen.remove')}\n"
+                f"{tr('help.citizen.list')}\n"
+                f"{tr('help.citizen.dossier')}"
             ),
             inline=False,
         )
         embed.add_field(
-            name="🏘️ Settlement Commands",
+            name=tr("help.section.settlement"),
             value=(
-                "`/settlement add` – Add a settlement *(Council only)*\n"
-                "`/settlement remove` – Remove an empty settlement *(Council only)*\n"
-                "`/settlement list` – List all settlements"
+                f"{tr('help.settlement.add')}\n"
+                f"{tr('help.settlement.remove')}\n"
+                f"{tr('help.settlement.list')}"
             ),
             inline=False,
         )
         embed.add_field(
-            name="📊 Reports",
+            name=tr("help.section.reports"),
             value=(
-                "`/report census` – Live population & activity report\n"
-                "`/report stats` – Quick population statistics\n"
-                "`/report trends` – Historical population trend charts\n"
-                "`/report export` – Download citizen data as CSV"
+                f"{tr('help.report.census')}\n"
+                f"{tr('help.report.stats')}\n"
+                f"{tr('help.report.trends')}\n"
+                f"{tr('help.report.export')}"
             ),
             inline=False,
         )
         embed.add_field(
-            name="🖥️ CivMC Server",
+            name=tr("help.section.server"),
+            value=(f"{tr('help.server.status')}\n{tr('help.server.ping')}"),
+            inline=False,
+        )
+        embed.add_field(
+            name=tr("help.section.data"),
             value=(
-                "`/server status` – Live server status, player count, MOTD\n"
-                "`/server ping` – Quick one-line server check"
+                f"{tr('help.data.backup')}\n"
+                f"{tr('help.data.list_backups')}\n"
+                f"{tr('help.data.restore')}"
             ),
             inline=False,
         )
         embed.add_field(
-            name="💾 Data Management *(Council only)*",
-            value=(
-                "`/data backup` – Create a manual database backup\n"
-                "`/data list_backups` – List all available backups\n"
-                "`/data restore` – Restore the database from a backup"
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="⚙️ Owner",
-            value="`/sync` – Re-sync slash commands to this server *(owner only)*",
+            name=tr("help.section.owner"),
+            value=tr("help.owner.sync"),
             inline=False,
         )
         embed.add_field(
             name="Activity Legend",
-            value="🟢 Active (<30d)  •  🟠 Semi-Active (30-60d)  •  🔴 Inactive (>60d)  •  ⚪ Unknown",
+            value=tr("help.activity_legend"),
             inline=False,
         )
-        embed.set_footer(text="Lambat Registry Bot • Report issues to your nation leadership")
+        embed.set_footer(text=tr("help.footer"))
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(

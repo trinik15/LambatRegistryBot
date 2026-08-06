@@ -10,6 +10,7 @@ from core import database as db
 from core import emojis as emoji_db
 from core.config import Config
 from core.constants import Emojis
+from core.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -228,22 +229,19 @@ class ActivityMonitor:
 
         # Costruzione messaggio
         lines = []
-        lines.append(f"# Summary of Lambat's Census of Population for {month_name}\n")
+        # Phase 4.5: monthly report headers are looked up via tr() so a
+        # Filipino-themed deployment (LOCALE=fil) can translate them. The
+        # numbers stay locale-independent.
+        lines.append(tr("monthly.title", month_name=month_name) + "\n")
 
         total_citizens = len(citizens)
         active_citizens = sum(province_active.values())
-        lines.append(
-            f"**Total Registered population (does not account for actual activity):** {total_citizens}\n"
-        )
+        lines.append(tr("monthly.total_registered", total=total_citizens) + "\n")
         if auth_broken:
-            lines.append(
-                "**Active population**: ⚠️ **Unavailable** — CivInfo API auth required. The numbers below are unreliable.\n"
-            )
+            lines.append(tr("monthly.auth_broken") + "\n")
         else:
             pct = round(active_citizens / total_citizens * 100, 2) if total_citizens else 0
-            lines.append(
-                f"**Active population (all players who have logged on within the month)**: {active_citizens} ({pct}% of reg. citizens)\n"
-            )
+            lines.append(tr("monthly.active_population", active=active_citizens, pct=pct) + "\n")
 
         if old_snapshots:
             old_total = sum(s["total"] for s in old_snapshots if s["district"] is None)
@@ -251,13 +249,9 @@ class ActivityMonitor:
             pct_total, arrow_total = calc_change(old_total, total_citizens)
             pct_active, arrow_active = calc_change(old_active, active_citizens)
             if pct_total is not None:
-                lines.append(
-                    f"Registered population change :    {pct_total}% from last month {arrow_total}"
-                )
+                lines.append(tr("monthly.reg_change", pct=pct_total, arrow=arrow_total))
             if pct_active is not None:
-                lines.append(
-                    f"Active population change:    {pct_active}% from last month {arrow_active}\n"
-                )
+                lines.append(tr("monthly.active_change", pct=pct_active, arrow=arrow_active) + "\n")
         else:
             lines.append("")
 
@@ -278,12 +272,11 @@ class ActivityMonitor:
                     continue
             if join_date >= one_month_ago:
                 new_citizens += 1
-        lines.append(
-            f"Gain: +{new_citizens} new citizens (excludes removed/revoked recruits and returnees)\n"
-        )
+        # Gain line (new citizens this month).
+        lines.append(tr("monthly.gain", new_citizens=new_citizens) + "\n")
 
         # POPULATION PER PROVINCE/TERRITORY
-        lines.append(f"**{Emojis.LAMBAT} POPULATION PER PROVINCE/TERRITORY, RANKED**\n")
+        lines.append(tr("monthly.section.province_total", emoji=Emojis.LAMBAT) + "\n")
         for duchy, total in sorted(province_totals.items(), key=lambda x: x[1], reverse=True):
             emoji = await emoji_db.get_province(duchy)
             old = old_province.get(duchy, (0, 0))[0]
@@ -296,7 +289,7 @@ class ActivityMonitor:
         lines.append("")
 
         # ACTIVE POPULATION PER PROVINCE
-        lines.append(f"{Emojis.LAMBAT_CHAD} **ACTIVE POPULATION PER PROVINCE/TERRITORY**\n")
+        lines.append(tr("monthly.section.province_active", emoji=Emojis.LAMBAT_CHAD) + "\n")
         for duchy, active in sorted(province_active.items(), key=lambda x: x[1], reverse=True):
             emoji = await emoji_db.get_province(duchy)
             old_active_val = old_province.get(duchy, (0, 0))[1]
@@ -309,7 +302,7 @@ class ActivityMonitor:
         lines.append("")
 
         # POPULATION PER DISTRICT
-        lines.append("**🏙️ POPULATION PER DISTRICT**\n")
+        lines.append(tr("monthly.section.district_total") + "\n")
         for district, total in sorted(district_totals.items(), key=lambda x: x[1], reverse=True):
             emoji = await emoji_db.get_district(district)
             old = old_district.get(district, (0, 0))[0]
@@ -322,7 +315,7 @@ class ActivityMonitor:
         lines.append("")
 
         # ACTIVE POPULATION PER DISTRICT
-        lines.append(f"{Emojis.LAMBATAN_SALUDO} **ACTIVE POPULATION PER DISTRICT**\n")
+        lines.append(tr("monthly.section.district_active", emoji=Emojis.LAMBATAN_SALUDO) + "\n")
         for district, active in sorted(district_active.items(), key=lambda x: x[1], reverse=True):
             emoji = await emoji_db.get_district(district)
             old_active_val = old_district.get(district, (0, 0))[1]

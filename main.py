@@ -1,6 +1,8 @@
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 from datetime import UTC, datetime, timedelta
 
 import aiohttp
@@ -290,12 +292,68 @@ async def main():
     # import otherwise), but mypy sees it as str | None from os.getenv.
     token = Config.DISCORD_TOKEN
     assert token is not None, "DISCORD_TOKEN is set (validate_config enforces it)"
+
+    # Phase 4.1: install signal handlers for graceful shutdown.
+    # Container orchestrators (Docker/Kubernetes/Render) send SIGTERM to ask
+    # the process to shut down; the default Python behaviour is to die
+    # immediately without flushing logs or closing the Discord gateway cleanly
+    # (which leaves the bot "online" in Discord for up to 5 minutes). We
+    # intercept SIGTERM (and SIGINT, for local Ctrl-C) and route both into
+    # bot.close(), which cancels loops, closes the HTTP session + DB pool, and
+    # logs out of the gateway — letting Discord mark us offline immediately.
+    #
+    # loop.add_signal_handler is Unix-only; on Windows we fall back to the
+    # signal.signal() form (which runs the callback in a thread, so we still
+    # schedule the close on the loop via run_coroutine_threadsafe).
+    loop = asyncio.get_running_loop()
+    shutdown_requested = False
+
+    def _request_shutdown():
+        nonlocal shutdown_requested
+        if shutdown_requested:
+            # Second signal (e.g. user hits Ctrl-C twice) — force-exit
+            # immediately so a stuck shutdown never traps the operator.
+            logger.warning("Second shutdown signal received; forcing exit.")
+            raise SystemExit(1)
+        shutdown_requested = True
+        logger.info("Shutdown signal received (SIGTERM/SIGINT); initiating graceful close.")
+        # bot.close() is idempotent — calling it here wakes bot.start() so the
+        # `finally` block runs, then the bounded wait below enforces the grace.
+        asyncio.ensure_future(bot.close())
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _request_shutdown)
+        except (NotImplementedError, AttributeError, RuntimeError):
+            # Windows / non-Unix platforms don't support loop.add_signal_handler.
+            # Fall back to the thread-based signal.signal() API. The handler
+            # schedules close() on the event loop from whatever thread the
+            # signal was delivered to.
+            def _thread_handler(signum, frame, _cb=_request_shutdown):
+                # Loop already closed — nothing more we can do; the
+                # asyncio.run() teardown will handle process exit.
+                with contextlib.suppress(RuntimeError):
+                    loop.call_soon_threadsafe(_cb)
+
+            signal.signal(sig, _thread_handler)
+
     try:
         await bot.start(token)
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped by interrupt.")
     finally:
-        await bot.close()
+        # Bound the close with SHUTDOWN_GRACE_SECONDS so a stuck DB pool close
+        # or a hung gateway logout never traps the container past its grace
+        # period (which would trigger a SIGKILL — losing log flushes).
+        try:
+            await asyncio.wait_for(bot.close(), timeout=Config.SHUTDOWN_GRACE_SECONDS)
+        except TimeoutError:
+            logger.error(
+                "Graceful shutdown exceeded SHUTDOWN_GRACE_SECONDS=%ds; forcing exit.",
+                Config.SHUTDOWN_GRACE_SECONDS,
+            )
+        except Exception as e:  # noqa: BLE001 — never crash during shutdown
+            logger.error(f"Error during graceful shutdown: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

@@ -148,7 +148,14 @@ class RoleSyncTask:
 
                 if Config.ROLE_SYNC_AUTO:
                     try:
-                        await role_manager.assign_citizen_roles(member, c["settlement"])
+                        # Phase 4.3: back off when the Discord gateway is
+                        # globally rate-limited. The weekly loop can fire
+                        # many add_roles calls in succession (one per
+                        # discrepancy), which can trip a 429 mid-batch and
+                        # leave the sync half-done. The guard waits up to
+                        # 30s for the limit to clear before each op.
+                        async with role_manager.rate_limit_guard(self.bot):
+                            await role_manager.assign_citizen_roles(member, c["settlement"])
                         fixed += 1
                         await audit.emit(
                             audit.ROLE_SYNC_FIXED,
