@@ -86,12 +86,11 @@ class TestGetServerStatusHistory:
         session = MagicMock()
         session.get = MagicMock(return_value=mock_resp)
 
-        with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-            "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-        ), patch(
-            "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-        ), patch(
-            "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+        with (
+            patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+            patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+            patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+            patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
         ):
             result = await civinfo_api.get_server_status_history("day", session)
 
@@ -120,12 +119,11 @@ class TestGetServerStatusHistory:
         session = MagicMock()
         session.get = MagicMock(return_value=mock_resp)
 
-        with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-            "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-        ), patch(
-            "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-        ), patch(
-            "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+        with (
+            patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+            patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+            patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+            patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
         ):
             result = await civinfo_api.get_server_status_history("day", session)
 
@@ -151,12 +149,11 @@ class TestGetServerStatusHistory:
         session = MagicMock()
         session.get = MagicMock(return_value=mock_resp)
 
-        with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-            "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-        ), patch(
-            "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-        ), patch(
-            "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+        with (
+            patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+            patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+            patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+            patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
         ):
             result = await civinfo_api.get_server_status_history("day", session)
 
@@ -176,12 +173,11 @@ class TestGetServerStatusHistory:
         session = MagicMock()
         session.get = MagicMock(return_value=mock_resp)
 
-        with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-            "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-        ), patch(
-            "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-        ), patch(
-            "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+        with (
+            patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+            patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+            patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+            patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
         ):
             result = await civinfo_api.get_server_status_history("day", session)
 
@@ -203,12 +199,11 @@ class TestGetServerStatusHistory:
         session = MagicMock()
         session.get = MagicMock(return_value=mock_resp)
 
-        with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-            "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-        ), patch(
-            "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-        ), patch(
-            "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+        with (
+            patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+            patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+            patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+            patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
         ):
             first = await civinfo_api.get_server_status_history("day", session)
             assert session.get.call_count == 1
@@ -232,12 +227,11 @@ class TestGetServerStatusHistory:
         session = MagicMock()
         session.get = MagicMock(return_value=mock_resp)
 
-        with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-            "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-        ), patch(
-            "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-        ), patch(
-            "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+        with (
+            patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+            patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+            patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+            patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
         ):
             await civinfo_api.get_server_status_history("week", session)
 

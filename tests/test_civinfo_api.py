@@ -70,9 +70,7 @@ def _pa(status="ok", emoji="🟢", last_login=None, text="Active (today)", **kw)
     """Helper: build a PlayerActivity with sensible defaults."""
     from api.civinfo_api import PlayerActivity
 
-    return PlayerActivity(
-        status=status, emoji=emoji, last_login=last_login, status_text=text, **kw
-    )
+    return PlayerActivity(status=status, emoji=emoji, last_login=last_login, status_text=text, **kw)
 
 
 def test_cache_returns_none_for_missing_key():
@@ -365,12 +363,11 @@ async def test_get_player_activity_success_parses_mc_accounts_full():
     session = MagicMock()
     session.get = MagicMock(return_value=mock_resp)
 
-    with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-        "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-    ), patch(
-        "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-    ), patch(
-        "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+    with (
+        patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+        patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+        patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+        patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
     ):
         pa = await civinfo_api.get_player_activity("Notch", session)
 
@@ -390,12 +387,11 @@ async def test_get_player_activity_not_found():
     session = MagicMock()
     session.get = MagicMock(return_value=mock_resp)
 
-    with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-        "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-    ), patch(
-        "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-    ), patch(
-        "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+    with (
+        patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+        patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+        patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+        patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
     ):
         pa = await civinfo_api.get_player_activity("Ghost", session)
 
@@ -412,12 +408,11 @@ async def test_get_player_activity_403_marks_auth_broken():
     session = MagicMock()
     session.get = MagicMock(return_value=mock_resp)
 
-    with patch("core.config.Config.CIVINFO_API_KEY", "fake-key"), patch(
-        "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-    ), patch(
-        "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-    ), patch(
-        "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+    with (
+        patch("core.config.Config.CIVINFO_API_KEY", "fake-key"),
+        patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+        patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+        patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
     ):
         pa = await civinfo_api.get_player_activity("Notch", session)
 
@@ -434,12 +429,11 @@ async def test_get_player_activity_sends_correct_params():
     session = MagicMock()
     session.get = MagicMock(return_value=mock_resp)
 
-    with patch("core.config.Config.CIVINFO_API_KEY", "my-key"), patch(
-        "core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"
-    ), patch(
-        "core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"
-    ), patch(
-        "core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"
+    with (
+        patch("core.config.Config.CIVINFO_API_KEY", "my-key"),
+        patch("core.config.Config.CIVINFO_API_BASE", "https://api.civinfo.net"),
+        patch("core.config.Config.CIVINFO_MC_SERVER", "play.civmc.net"),
+        patch("core.config.Config.CIVINFO_FRONTEND_VERSION", "abc123"),
     ):
         await civinfo_api.get_player_activity("Notch", session)
 

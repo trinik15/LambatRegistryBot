@@ -190,7 +190,9 @@ def _build_factory_embed(factory_key: str, factory: dict, config: dict) -> disco
 
         if len(recipe_details) > MAX_RECIPE_FIELDS:
             remaining = len(recipe_details) - MAX_RECIPE_FIELDS
-            recipe_lines.append(f"*...and {remaining} more — use /factory recipe <id> for details.*")
+            recipe_lines.append(
+                f"*...and {remaining} more — use /factory recipe <id> for details.*"
+            )
 
         embed.add_field(
             name=f"📋 Recipes ({len(recipes_list)} total)",

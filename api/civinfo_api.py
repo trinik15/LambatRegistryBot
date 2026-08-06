@@ -78,8 +78,7 @@ class PlayerActivity:
     def is_online(self) -> bool:
         """True if the player is currently logged in (last_login > last_logout)."""
         return bool(
-            self.last_login
-            and (not self.last_logout or self.last_login > self.last_logout)
+            self.last_login and (not self.last_logout or self.last_login > self.last_logout)
         )
 
 
@@ -247,9 +246,7 @@ def _bucket_activity(last_login: datetime) -> tuple[str, str]:
     return "🔴", f"Inactive ({days_ago}d ago)"
 
 
-async def get_player_activity(
-    ign: str, session: aiohttp.ClientSession
-) -> PlayerActivity:
+async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> PlayerActivity:
     """Fetch a single player's CivMC activity via the mc-accounts/full endpoint.
 
     Returns a :class:`PlayerActivity` with ``status`` one of:
@@ -346,16 +343,12 @@ async def get_player_activity(
 
     except TimeoutError:
         logger.warning(f"Timeout fetching CivInfo for {ign}")
-        result = PlayerActivity(
-            status="error", emoji="⚪", last_login=None, status_text="Timeout"
-        )
+        result = PlayerActivity(status="error", emoji="⚪", last_login=None, status_text="Timeout")
         cache.set(ign, result, ttl=_ttl_for("error"))
         return result
     except Exception as e:
         logger.error(f"Error fetching {ign}: {e}", exc_info=True)
-        result = PlayerActivity(
-            status="error", emoji="⚪", last_login=None, status_text="Error"
-        )
+        result = PlayerActivity(status="error", emoji="⚪", last_login=None, status_text="Error")
         cache.set(ign, result, ttl=_ttl_for("error"))
         return result
 

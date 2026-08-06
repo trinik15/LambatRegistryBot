@@ -247,9 +247,7 @@ async def init_db():
                         "ALTER COLUMN last_checked TYPE TIMESTAMPTZ "
                         "USING last_checked AT TIME ZONE 'UTC'"
                     )
-                    logger.info(
-                        "Migrated activity_cache.last_login + last_checked to TIMESTAMPTZ."
-                    )
+                    logger.info("Migrated activity_cache.last_login + last_checked to TIMESTAMPTZ.")
 
                 # Add the new columns if they don't exist (idempotent —
                 # ADD COLUMN IF NOT EXISTS is safe on Postgres 9.6+).

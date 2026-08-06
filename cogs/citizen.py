@@ -288,9 +288,7 @@ class CitizenCog(commands.Cog):
                 # not CivInfo) and surface a warning so council knows the
                 # activity wasn't verified.
                 civinfo_warning = None
-                pa = await civinfo_api.get_player_activity(
-                    ign, self.bot.http_session
-                )
+                pa = await civinfo_api.get_player_activity(ign, self.bot.http_session)
                 if pa.status == "error":
                     civinfo_warning = pa.status_text or "CivInfo unavailable"
                 elif pa.status == "not_found":
@@ -824,9 +822,7 @@ class CitizenCog(commands.Cog):
             await interaction.followup.send(f"❌ No citizen with IGN `{ign}`.")
             return
 
-        pa = await civinfo_api.get_player_activity(
-            ign, self.bot.http_session
-        )
+        pa = await civinfo_api.get_player_activity(ign, self.bot.http_session)
 
         recruiter_ids = row["recruiter_ids"].split(",") if row["recruiter_ids"] else []
         recruiter_mentions = ", ".join([f"<@{rid}>" for rid in recruiter_ids if rid]) or "None"

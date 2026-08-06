@@ -290,9 +290,7 @@ class SettlementCog(commands.Cog):
             igns = [c["ign"] for c in citizens]
             activities = await _fetch_activities(igns, self.bot.http_session)
 
-        active_count = sum(
-            1 for pa in activities.values() if pa.emoji == "🟢"
-        )
+        active_count = sum(1 for pa in activities.values() if pa.emoji == "🟢")
         semi_count = sum(1 for pa in activities.values() if pa.emoji == "🟠")
         inactive_count = sum(1 for pa in activities.values() if pa.emoji == "🔴")
         active_rate = round(active_count / total * 100, 1) if total else 0.0

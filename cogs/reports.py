@@ -116,6 +116,7 @@ class ReportsCog(commands.Cog):
                     # Shouldn't happen — _fetch_activities covers every IGN —
                     # but degrade gracefully rather than crashing the report.
                     from api.civinfo_api import PlayerActivity
+
                     pa = PlayerActivity(
                         status="error", emoji="⚪", last_login=None, status_text="Error"
                     )

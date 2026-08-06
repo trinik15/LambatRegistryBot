@@ -154,9 +154,7 @@ class TestGetFactoryRecipes:
 
     def test_resolves_all_recipes(self):
         config = {
-            "factories": {
-                "oxygen": {"recipes": ["recipe_a", "recipe_b"]}
-            },
+            "factories": {"oxygen": {"recipes": ["recipe_a", "recipe_b"]}},
             "recipes": {
                 "recipe_a": {"name": "Recipe A", "type": "PRODUCTION"},
                 "recipe_b": {"name": "Recipe B", "type": "PRODUCTION"},
@@ -304,7 +302,10 @@ class TestBuildFactoryEmbed:
     def test_factory_with_no_setup_cost_shows_default_message(self):
         from cogs.factory import _build_factory_embed
 
-        config = {"factories": {"basic": {"type": "FCC", "name": "Basic", "recipes": []}}, "recipes": {}}
+        config = {
+            "factories": {"basic": {"type": "FCC", "name": "Basic", "recipes": []}},
+            "recipes": {},
+        }
         embed = _build_factory_embed("basic", config["factories"]["basic"], config)
         setup_field = next(f for f in embed.fields if "Setup Cost" in f.name)
         assert "none" in setup_field.value.lower()
