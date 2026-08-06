@@ -118,6 +118,31 @@ class Config:
     # the policy itself is visible in /audit search.
     AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", 0))
 
+    # --- Churn alerts (ROADMAP Phase 5 speculative → implemented) ---
+    # Weekly task that DMs a citizen's recruiter(s) when the citizen hasn't
+    # logged into CivMC for CHURN_THRESHOLD_DAYS. Opt-in because it DMs real
+    # humans — defaults off so a fresh deploy never surprises recruiters.
+    # Reuses activity_cache (last_login) + recruiters junction + audit_log
+    # (cooldown tracking) — no new tables.
+    CHURN_NUDGES_ENABLED = os.getenv("CHURN_NUDGES_ENABLED", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    # How many days of inactivity before a citizen is flagged for a nudge.
+    # 30 = Semi-Inactive tier and worse (matches civinfo_api._bucket_activity).
+    CHURN_THRESHOLD_DAYS = int(os.getenv("CHURN_THRESHOLD_DAYS", 30))
+    # Per-citizen cooldown: once a nudge is *delivered* about a citizen, skip
+    # them for this many days so a recruiter isn't spammed weekly. Tracked via
+    # audit_log (action=churn.nudge, details->>'delivered'='true').
+    CHURN_NUDGE_COOLDOWN_DAYS = int(os.getenv("CHURN_NUDGE_COOLDOWN_DAYS", 14))
+    # Weekly slot (default Monday 04:00 UTC — offset from the 02:00 daily_backup
+    # / daily_check and the 03:30 audit prune so the four nightly jobs don't
+    # contend for the asyncpg pool).
+    CHURN_NUDGE_WEEKLY_DAY = int(os.getenv("CHURN_NUDGE_WEEKLY_DAY", 0))  # Monday
+    CHURN_NUDGE_WEEKLY_HOUR = int(os.getenv("CHURN_NUDGE_WEEKLY_HOUR", 4))  # 04:00 UTC
+
     # --- Applications channel (Phase 3.4) ---
     # Channel that receives an embed for every new /apply submission so council
     # can review and approve/reject via the buttons. 0 = disabled (applications
@@ -254,6 +279,16 @@ class Config:
         # int enables the nightly prune. Negative values are meaningless.
         if cls.AUDIT_RETENTION_DAYS < 0:
             raise ValueError("AUDIT_RETENTION_DAYS must be >= 0 (0 = keep forever).")
+
+        # Validate churn-alert config (ROADMAP Phase 5 → implemented).
+        if cls.CHURN_THRESHOLD_DAYS < 1:
+            raise ValueError("CHURN_THRESHOLD_DAYS must be at least 1.")
+        if cls.CHURN_NUDGE_COOLDOWN_DAYS < 1:
+            raise ValueError("CHURN_NUDGE_COOLDOWN_DAYS must be at least 1.")
+        if not 0 <= cls.CHURN_NUDGE_WEEKLY_DAY <= 6:
+            raise ValueError("CHURN_NUDGE_WEEKLY_DAY must be 0-6 (Mon-Sun).")
+        if not 0 <= cls.CHURN_NUDGE_WEEKLY_HOUR <= 23:
+            raise ValueError("CHURN_NUDGE_WEEKLY_HOUR must be 0-23 (UTC).")
 
         logger.info("Configuration validated successfully.")
 

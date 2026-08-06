@@ -30,9 +30,10 @@ def test_all_actions_complete_and_stable():
     assert audit.EMOJI_SET == "emoji.set"
     assert audit.SNAPSHOT_ANNOTATE == "snapshot.annotate"
     assert audit.AUDIT_PRUNE == "audit.prune"
-    assert len(audit.ALL_ACTIONS) == 10
+    assert audit.CHURN_NUDGE == "churn.nudge"
+    assert len(audit.ALL_ACTIONS) == 11
     # No duplicates.
-    assert len(set(audit.ALL_ACTIONS)) == 10
+    assert len(set(audit.ALL_ACTIONS)) == 11
 
 
 def test_snapshot_annotate_has_label_and_color():
@@ -50,6 +51,17 @@ def test_audit_prune_has_label():
     """
     assert audit._action_label(audit.AUDIT_PRUNE) == "Audit log pruned"
     assert audit.AUDIT_PRUNE in audit.ALL_ACTIONS
+
+
+def test_churn_nudge_has_label_and_amber_color():
+    """ROADMAP Phase 5: the churn-nudge action renders with an attention color.
+
+    Amber (0xF39C12) so a recruiter nudge stands out from the green creates /
+    orange removes / blurple updates in the audit channel.
+    """
+    assert audit._action_label(audit.CHURN_NUDGE) == "Churn nudge sent"
+    assert audit._action_color(audit.CHURN_NUDGE) == 0xF39C12
+    assert audit.CHURN_NUDGE in audit.ALL_ACTIONS
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ from core.logging_config import setup_logging
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
 from tasks.audit_retention import AuditRetentionTask
+from tasks.churn_alerts import ChurnAlertsTask
 from tasks.role_sync import RoleSyncTask
 from tasks.uptime_monitor import UptimeMonitor
 from web.health import start_health_server
@@ -38,6 +39,7 @@ class LambatRegistryBot(commands.Bot):
         self.uptime_monitor = None
         self.role_sync = None  # Phase 2.5: weekly role reconciliation task
         self.audit_retention = None  # ROADMAP §6.2: nightly audit_log prune
+        self.churn_alerts = None  # ROADMAP Phase 5: weekly recruiter churn nudges
 
     async def setup_hook(self):
         """
@@ -106,6 +108,16 @@ class LambatRegistryBot(commands.Bot):
             self.audit_retention.start()
         except Exception as e:
             logger.error(f"Failed to start audit_retention task: {e}", exc_info=True)
+
+        # 3c-quater. Start the weekly churn-alert nudge task (ROADMAP Phase 5).
+        #            DMs a citizen's recruiter(s) when the citizen hasn't logged
+        #            into CivMC for CHURN_THRESHOLD_DAYS. Opt-in
+        #            (CHURN_NUDGES_ENABLED, default false) — DMs real humans.
+        try:
+            self.churn_alerts = ChurnAlertsTask(self)
+            self.churn_alerts.start()
+        except Exception as e:
+            logger.error(f"Failed to start churn_alerts task: {e}", exc_info=True)
 
         # 3d. Start the HTTP keep-alive + health server so the host platform
         #     (e.g. Render) does not mark the service as idle and shut it down.
@@ -288,6 +300,10 @@ class LambatRegistryBot(commands.Bot):
         # Stop the nightly audit-log retention prune if running (ROADMAP §6.2).
         if self.audit_retention:
             self.audit_retention.stop()
+
+        # Stop the weekly churn-alert nudge task if running (ROADMAP Phase 5).
+        if self.churn_alerts:
+            self.churn_alerts.stop()
 
         # Close HTTP session
         if self.http_session and not self.http_session.closed:

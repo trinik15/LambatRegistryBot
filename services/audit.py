@@ -53,6 +53,13 @@ SNAPSHOT_ANNOTATE = "snapshot.annotate"
 # record that the nightly prune ran and how many rows it removed — so the
 # retention policy itself is visible in /audit search.
 AUDIT_PRUNE = "audit.prune"
+# Churn nudge (ROADMAP Phase 5 speculative → implemented). Emitted by
+# tasks/churn_alerts.py when a recruiter is DM'd about an inactive citizen they
+# recruited. ``details`` carries {recruiter, ign, settlement, days_inactive,
+# delivered} — ``delivered=false`` marks a DM that failed (user closed DMs /
+# left the server); the cooldown query filters these out so a failed nudge
+# retries the following week.
+CHURN_NUDGE = "churn.nudge"
 
 ALL_ACTIONS = (
     CITIZEN_ADD,
@@ -65,6 +72,7 @@ ALL_ACTIONS = (
     EMOJI_SET,
     SNAPSHOT_ANNOTATE,
     AUDIT_PRUNE,
+    CHURN_NUDGE,
 )
 
 
@@ -357,6 +365,7 @@ def _action_label(action: str) -> str:
         EMOJI_SET: "Emoji updated",
         SNAPSHOT_ANNOTATE: "Snapshot annotated",
         AUDIT_PRUNE: "Audit log pruned",
+        CHURN_NUDGE: "Churn nudge sent",
     }.get(action, action)
 
 
@@ -370,6 +379,8 @@ def _action_color(action: str) -> int:
         return 0xFF9900  # orange
     if action == ROLE_SYNC_FIXED:
         return 0x57F287  # light green
+    if action == CHURN_NUDGE:
+        return 0xF39C12  # amber — "attention: retention nudge"
     return 0x7289DA  # default grey-blue
 
 
