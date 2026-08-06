@@ -29,9 +29,10 @@ def test_all_actions_complete_and_stable():
     assert audit.ROLE_SYNC_FIXED == "role_sync.fixed"
     assert audit.EMOJI_SET == "emoji.set"
     assert audit.SNAPSHOT_ANNOTATE == "snapshot.annotate"
-    assert len(audit.ALL_ACTIONS) == 9
+    assert audit.AUDIT_PRUNE == "audit.prune"
+    assert len(audit.ALL_ACTIONS) == 10
     # No duplicates.
-    assert len(set(audit.ALL_ACTIONS)) == 9
+    assert len(set(audit.ALL_ACTIONS)) == 10
 
 
 def test_snapshot_annotate_has_label_and_color():
@@ -39,6 +40,16 @@ def test_snapshot_annotate_has_label_and_color():
     assert audit._action_label(audit.SNAPSHOT_ANNOTATE) == "Snapshot annotated"
     # Blurple (same as citizen.update — it's an update-class op).
     assert audit._action_color(audit.SNAPSHOT_ANNOTATE) == 0x5865F2
+
+
+def test_audit_prune_has_label():
+    """ROADMAP §6.2: the retention-prune action renders in the audit embed.
+
+    Color is left to the default grey-blue (it's a maintenance op, not a
+    create/update/remove) so we only assert the label here.
+    """
+    assert audit._action_label(audit.AUDIT_PRUNE) == "Audit log pruned"
+    assert audit.AUDIT_PRUNE in audit.ALL_ACTIONS
 
 
 # ---------------------------------------------------------------------------

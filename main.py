@@ -14,6 +14,7 @@ from core.config import Config
 from core.logging_config import setup_logging
 from services import backup
 from tasks.activity_monitor import ActivityMonitor
+from tasks.audit_retention import AuditRetentionTask
 from tasks.role_sync import RoleSyncTask
 from tasks.uptime_monitor import UptimeMonitor
 from web.health import start_health_server
@@ -36,6 +37,7 @@ class LambatRegistryBot(commands.Bot):
         self.activity_monitor = None
         self.uptime_monitor = None
         self.role_sync = None  # Phase 2.5: weekly role reconciliation task
+        self.audit_retention = None  # ROADMAP §6.2: nightly audit_log prune
 
     async def setup_hook(self):
         """
@@ -94,6 +96,16 @@ class LambatRegistryBot(commands.Bot):
             self.role_sync.start()
         except Exception as e:
             logger.error(f"Failed to start role_sync task: {e}", exc_info=True)
+
+        # 3c-ter. Start the nightly audit-log retention prune (ROADMAP §6.2).
+        #        No-op when AUDIT_RETENTION_DAYS <= 0 (keep forever); otherwise
+        #        DELETEs rows older than the window at 03:30 UTC and emits an
+        #        audit.prune entry so the policy is itself auditable.
+        try:
+            self.audit_retention = AuditRetentionTask(self)
+            self.audit_retention.start()
+        except Exception as e:
+            logger.error(f"Failed to start audit_retention task: {e}", exc_info=True)
 
         # 3d. Start the HTTP keep-alive + health server so the host platform
         #     (e.g. Render) does not mark the service as idle and shut it down.
@@ -272,6 +284,10 @@ class LambatRegistryBot(commands.Bot):
         # Stop the weekly role reconciliation task if running (Phase 2.5).
         if self.role_sync:
             self.role_sync.stop()
+
+        # Stop the nightly audit-log retention prune if running (ROADMAP §6.2).
+        if self.audit_retention:
+            self.audit_retention.stop()
 
         # Close HTTP session
         if self.http_session and not self.http_session.closed:

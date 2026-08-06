@@ -49,6 +49,10 @@ ROLE_SYNC_DISCREPANCY = "role_sync.discrepancy"
 ROLE_SYNC_FIXED = "role_sync.fixed"
 EMOJI_SET = "emoji.set"
 SNAPSHOT_ANNOTATE = "snapshot.annotate"
+# Audit retention prune (ROADMAP §6.2). Emitted by tasks/audit_retention.py to
+# record that the nightly prune ran and how many rows it removed — so the
+# retention policy itself is visible in /audit search.
+AUDIT_PRUNE = "audit.prune"
 
 ALL_ACTIONS = (
     CITIZEN_ADD,
@@ -60,6 +64,7 @@ ALL_ACTIONS = (
     ROLE_SYNC_FIXED,
     EMOJI_SET,
     SNAPSHOT_ANNOTATE,
+    AUDIT_PRUNE,
 )
 
 
@@ -159,6 +164,41 @@ async def search(
 
     rows = await db.execute_query(query, tuple(params), fetch_all=True)
     return [dict(r) for r in rows] if rows else []
+
+
+async def prune_older_than(days: int) -> int:
+    """Delete ``audit_log`` rows older than ``days`` days. Returns the count removed.
+
+    Closes ROADMAP §6.2 (open decision: keep audit forever vs rolling retention).
+    The caller (tasks/audit_retention.py) is responsible for the no-op-when-
+    disabled gate (``AUDIT_RETENTION_DAYS <= 0``); this function still defends
+    against ``days <= 0`` by returning 0 without touching the DB, so it's safe
+    to call directly from a one-off script or REPL.
+
+    Uses ``NOW() - ($1 * INTERVAL '1 day')`` so the threshold is computed
+    server-side in one expression (no Python→SQL timestamp round-trip, no
+    clock-skew between app and DB). The ``DELETE`` runs in its own transaction
+    (acquired connection); a failure is logged and re-raised so the nightly
+    task's top-level handler surfaces it — unlike ``emit``, a prune failure is
+    NOT silently swallowed because there's no user mutation to protect.
+    """
+    if days <= 0:
+        return 0
+    from core import database as db
+
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        # asyncpg's execute() returns a command-status string like "DELETE 42".
+        # Parse the trailing integer for the count.
+        status = await conn.execute(
+            "DELETE FROM audit_log WHERE ts < NOW() - ($1 * INTERVAL '1 day')",
+            days,
+        )
+        try:
+            return int(status.rsplit(" ", 1)[-1])
+        except (ValueError, IndexError):
+            logger.warning(f"Could not parse DELETE row count from status {status!r}")
+            return 0
 
 
 async def post_to_channel(
@@ -316,6 +356,7 @@ def _action_label(action: str) -> str:
         ROLE_SYNC_FIXED: "Role auto-fixed",
         EMOJI_SET: "Emoji updated",
         SNAPSHOT_ANNOTATE: "Snapshot annotated",
+        AUDIT_PRUNE: "Audit log pruned",
     }.get(action, action)
 
 
