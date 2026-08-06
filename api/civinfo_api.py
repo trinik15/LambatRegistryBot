@@ -358,3 +358,114 @@ async def get_player_activity(
         )
         cache.set(ign, result, ttl=_ttl_for("error"))
         return result
+
+
+# --- Server status history (WS-5) -------------------------------------------
+# GET /mc-server-status/{mcServer}/{period} returns a historical time series
+# of player counts: {"timestamps": [int, ...], "playerCounts": [int, ...]}.
+# period ∈ {"day", "hour", "minute"}. Different from mcsrvstat.us (which is
+# live-only) — this endpoint gives trends, not current status.
+
+# Historical data changes at most once per minute, so a short TTL is fine.
+# The official frontend doesn't cache this at all (re-fetches on every render),
+# but we do — Discord commands shouldn't hammer a third-party API on cooldown.
+SERVER_STATUS_CACHE_TTL = 60  # 1 min
+
+# Module-level cache for server-status history. Keyed by period (str) — there
+# are only 3 possible keys so this never grows unbounded.
+_server_status_cache: dict[str, tuple[list[tuple[datetime, int]], float]] = {}
+
+
+async def get_server_status_history(
+    period: str, session: aiohttp.ClientSession
+) -> list[tuple[datetime, int]]:
+    """Fetch historical CivMC player counts from mc-server-status.
+
+    Args:
+        period: One of ``"day"``, ``"hour"``, ``"minute"``.
+        session: aiohttp client session.
+
+    Returns:
+        A list of ``(timestamp, player_count)`` tuples sorted ascending by
+        timestamp. Empty list on error / auth-broken / no data.
+
+    Shares the same Bearer auth + civinfo-version header as
+    :func:`get_player_activity`. On 401/403 it marks auth-broken (so the
+    caller's /citizen activity lookups also degrade honestly) and returns [].
+    """
+    if period not in {"day", "hour", "minute"}:
+        logger.warning(f"Invalid period {period!r}; defaulting to 'day'.")
+        period = "day"
+
+    # Check the cache first.
+    cached = _server_status_cache.get(period)
+    if cached:
+        data, expires = cached
+        if datetime.now(UTC).timestamp() < expires:
+            return data
+
+    # If auth is known-broken, don't hammer the API.
+    if is_auth_broken():
+        return []
+
+    from core.config import Config
+
+    url = f"{Config.CIVINFO_API_BASE}/mc-server-status/{Config.CIVINFO_MC_SERVER}/{period}"
+
+    try:
+        async with session.get(url, headers=_request_headers()) as resp:
+            if resp.status in (401, 403):
+                _mark_auth_broken(f"HTTP {resp.status} (server-status)")
+                return []
+
+            if resp.status != 200:
+                logger.debug(f"mc-server-status returned {resp.status} for period={period}")
+                return []
+
+            data = await resp.json()
+            _clear_auth_broken()
+
+            # Response shape: {"timestamps": [int, ...], "playerCounts": [int, ...]}
+            # Both are parallel arrays of epoch-ms ints. The civmc.netlify.app
+            # frontend reads them the same way.
+            raw_ts = data.get("timestamps") or []
+            raw_counts = data.get("playerCounts") or []
+
+            # If playerCounts is a single int (not a list), wrap it — the
+            # endpoint sometimes returns a scalar when there's only one data
+            # point (observed in the bundle's defensive code).
+            if isinstance(raw_counts, (int, float)):
+                raw_counts = [raw_counts]
+
+            # Zip the two parallel arrays, parsing timestamps and filtering
+            # out any entries where either value is None/invalid.
+            result: list[tuple[datetime, int]] = []
+            for ts, count in zip(raw_ts, raw_counts, strict=False):
+                parsed_ts = _parse_ts(ts)
+                if parsed_ts is None or count is None:
+                    continue
+                try:
+                    result.append((parsed_ts, int(count)))
+                except (TypeError, ValueError):
+                    continue
+
+            result.sort(key=lambda x: x[0])
+
+            # Cache the result.
+            _server_status_cache[period] = (
+                result,
+                datetime.now(UTC).timestamp() + SERVER_STATUS_CACHE_TTL,
+            )
+            return result
+
+    except TimeoutError:
+        logger.warning(f"Timeout fetching mc-server-status for period={period}")
+        return []
+    except Exception as e:
+        logger.error(f"Error fetching server-status history: {e}", exc_info=True)
+        return []
+
+
+def invalidate_server_status_cache():
+    """Drop all cached server-status history (e.g. after a config change)."""
+    _server_status_cache.clear()

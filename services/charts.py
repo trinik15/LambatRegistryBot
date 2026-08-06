@@ -256,3 +256,118 @@ def render_activity_series(
     _close_all([fig])
     buf.seek(0)
     return buf.getvalue()
+
+
+def render_server_trends(
+    title: str,
+    data: list[tuple],
+    period: str = "day",
+) -> bytes | None:
+    """Render a single-panel player-count time-series chart (WS-5).
+
+    Args:
+        title: Chart title (e.g. "CivMC Player Count — Last 24h").
+        data: List of (timestamp, player_count) tuples sorted ascending.
+            timestamp can be a datetime or epoch float.
+        period: One of "day", "hour", "minute" — controls the x-axis
+            date formatter and the stats summary (peak/low/avg).
+
+    Returns:
+        PNG bytes, or None if there's not enough data (fewer than 1 point).
+    """
+    if not data:
+        return None
+
+    _apply_dark_style()
+    fig, ax = plt.subplots(1, 1, figsize=(10, 5))
+
+    # Split the parallel arrays.
+    timestamps = [d[0] for d in data]
+    counts = [d[1] for d in data]
+
+    # Player count line — filled area underneath for visibility.
+    ax.plot(
+        timestamps,
+        counts,
+        color=COLOR_ACTIVE,
+        marker="",
+        linewidth=2,
+        markersize=0,
+        label="Players online",
+    )
+    ax.fill_between(timestamps, counts, alpha=0.25, color=COLOR_ACTIVE)
+
+    ax.set_title(title)
+    ax.set_ylabel("Players Online")
+
+    # X-axis formatter depends on the period.
+    if period == "minute":
+        ax.xaxis.set_major_formatter(DateFormatter("%H:%M"))
+        xlabel = "Time (UTC, last 60 min)"
+    elif period == "hour":
+        ax.xaxis.set_major_formatter(DateFormatter("%H:%M"))
+        xlabel = "Time (UTC, last 24h)"
+    else:  # day
+        ax.xaxis.set_major_formatter(DateFormatter("%m/%d %H:%M"))
+        xlabel = "Time (UTC, last 24h)"
+
+    ax.set_xlabel(xlabel)
+
+    # Annotate peak + low points so leadership can see when the server is busy.
+    if len(counts) > 1:
+        peak_idx = counts.index(max(counts))
+        low_idx = counts.index(min(counts))
+        peak_ts, peak_val = timestamps[peak_idx], counts[peak_idx]
+        low_ts, low_val = timestamps[low_idx], counts[low_idx]
+
+        ax.annotate(
+            f"Peak: {peak_val}",
+            xy=(peak_ts, peak_val),
+            xytext=(10, 10),
+            textcoords="offset points",
+            fontsize=9,
+            color=COLOR_ACTIVE,
+            fontweight="bold",
+            arrowprops={"arrowstyle": "->", "color": COLOR_ACTIVE, "lw": 1.5},
+        )
+        ax.annotate(
+            f"Low: {low_val}",
+            xy=(low_ts, low_val),
+            xytext=(10, -20),
+            textcoords="offset points",
+            fontsize=9,
+            color=COLOR_INACTIVE,
+            fontweight="bold",
+            arrowprops={"arrowstyle": "->", "color": COLOR_INACTIVE, "lw": 1.5},
+        )
+
+    if len(timestamps) > 1:
+        ax.set_xlim(timestamps[0], timestamps[-1])
+
+    # Stats summary as a text box (top-right, below the title).
+    if counts:
+        avg = sum(counts) / len(counts)
+        stats_text = f"Peak: {max(counts)}  •  Low: {min(counts)}  •  Avg: {avg:.1f}"
+        fig.text(
+            0.99,
+            0.01,
+            stats_text,
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            color=COLOR_TEXT,
+            bbox={
+                "facecolor": COLOR_GRID,
+                "edgecolor": COLOR_GRID,
+                "alpha": 0.6,
+                "boxstyle": "round,pad=0.4",
+            },
+        )
+
+    fig.tight_layout(pad=2.0)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120, facecolor=COLOR_BG)
+    _close_all([fig])
+    buf.seek(0)
+    return buf.getvalue()

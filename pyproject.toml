@@ -23,6 +23,9 @@ dependencies = [
     # of the base install; they're pulled in only when BACKUP_SINK needs them.
     "structlog>=24.1.0",
     "prometheus-client>=0.20.0",
+    # Phase B (WS-6): YAML parser for the FactoryMod config fetched from GitHub.
+    # Used by /factory commands to parse the CivMC/Civ config.yml (cached 1h).
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

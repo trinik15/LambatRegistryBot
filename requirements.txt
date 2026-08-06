@@ -13,3 +13,6 @@ matplotlib==3.11.1
 # (core/logging_config.py, core/metrics.py) and are therefore runtime deps.
 structlog==26.1.0
 prometheus-client==0.26.0
+# Phase B (WS-6): YAML parser for the FactoryMod config fetched from GitHub.
+# Used by /factory commands to parse the CivMC/Civ config.yml (482 KB, cached 1h).
+pyyaml==6.0.3
