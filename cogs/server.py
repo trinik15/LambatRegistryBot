@@ -208,6 +208,107 @@ class ServerCog(commands.Cog):
         )
         await interaction.followup.send(embed=embed)
 
+    @server_group.command(
+        name="trends", description="Show CivMC player-count trends (last 24h / hour / minute)"
+    )
+    @app_commands.choices(
+        period=[
+            app_commands.Choice(name="Last 24 hours", value="day"),
+            app_commands.Choice(name="Last hour", value="hour"),
+            app_commands.Choice(name="Last minute", value="minute"),
+        ]
+    )
+    @app_commands.checks.cooldown(
+        1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "server_trends")
+    )
+    async def server_trends(
+        self,
+        interaction: discord.Interaction,
+        period: app_commands.Choice[str] | None = None,
+    ):
+        """Phase B (WS-5): historical player-count sparkline via CivInfo mc-server-status.
+
+        Different from /server status (live, via mcsrvstat.us) — this shows
+        trends over time, so leadership can see when CivMC is busy.
+        """
+        await interaction.response.defer()
+
+        # Default to "day" (last 24h) if no period selected.
+        period_val = period.value if period else "day"
+        period_label = period.name if period else "Last 24 hours"
+
+        # Fetch historical data from CivInfo (shared auth with activity API).
+        from api import civinfo_api
+
+        if civinfo_api.is_auth_broken():
+            embed = discord.Embed(
+                title="📈 CivMC Player Count Trends",
+                description=(
+                    "⚠️ **Activity data unavailable**\n"
+                    "CivInfo API auth required — contact an admin.\n"
+                    "_(Set `CIVINFO_API_KEY` to enable trends.)_"
+                ),
+                color=0xED4245,
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
+
+        history = await civinfo_api.get_server_status_history(
+            period_val, self.bot.http_session
+        )
+
+        if not history:
+            embed = discord.Embed(
+                title="📈 CivMC Player Count Trends",
+                description=(
+                    "⚠️ No trend data available right now.\n"
+                    "This could mean CivInfo is temporarily unreachable, or the "
+                    "CivMC server hasn't had any recorded activity in this period."
+                ),
+                color=0xFAA61A,
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
+        # Render the chart in an executor (matplotlib is blocking).
+        import asyncio
+
+        from services import charts
+
+        title = f"CivMC Player Count — {period_label}"
+        png_bytes = await asyncio.get_event_loop().run_in_executor(
+            None, charts.render_server_trends, title, history, period_val
+        )
+
+        if not png_bytes:
+            embed = discord.Embed(
+                title="📈 CivMC Player Count Trends",
+                description="⚠️ Not enough data to render a chart.",
+                color=0xFAA61A,
+            )
+            await interaction.followup.send(embed=embed)
+            return
+
+        # Compute summary stats for the embed.
+        counts = [c for _, c in history]
+        peak = max(counts)
+        low = min(counts)
+        avg = sum(counts) / len(counts)
+
+        embed = discord.Embed(
+            title="📈 CivMC Player Count Trends",
+            description=f"**{period_label}** — {len(history)} data points",
+            color=0x3BAD4C,
+        )
+        embed.add_field(name="Peak", value=f"👥 {peak}", inline=True)
+        embed.add_field(name="Low", value=f"👤 {low}", inline=True)
+        embed.add_field(name="Average", value=f"📊 {avg:.1f}", inline=True)
+        embed.set_footer(text="Data: api.civinfo.net • Cached 60s")
+
+        file = discord.File(io.BytesIO(png_bytes), filename="server_trends.png")
+        embed.set_image(url="attachment://server_trends.png")
+        await interaction.followup.send(embed=embed, file=file)
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers (testable without Discord / DB)

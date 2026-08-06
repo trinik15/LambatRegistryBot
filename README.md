@@ -25,6 +25,11 @@ for outages.
 | `/report export` | Download all citizen data as CSV | View |
 | `/server status` | Live CivMC server status (players, version, MOTD, icon) | Everyone |
 | `/server ping` | Quick one-line server check | Everyone |
+| `/server online` | Show which Lambat citizens are online on CivMC right now | Everyone |
+| `/server trends` | Historical player-count sparkline (last 24h / hour / minute) | Everyone |
+| `/factory info` | Show a factory's setup cost + recipe list | Everyone |
+| `/factory list` | List all 61 FactoryMod factories grouped by type | Everyone |
+| `/factory recipe` | Show a recipe's inputs, outputs, and production time | Everyone |
 | `/data backup` | Manual database backup | Council |
 | `/data list_backups` | List all available backups | Council |
 | `/data restore` | Restore database from a backup (with emergency pre-restore backup) | Council |
@@ -244,6 +249,28 @@ Additional env vars (all have sensible defaults — only override for testing):
 - `CIVINFO_FRONTEND_VERSION` — the `civinfo-version` header git hash, sent on
   every request to mirror the official frontend. Observational today; update
   if Gjum ever makes it required.
+
+### Phase B: /server trends + /factory commands
+
+Two new capabilities built on the Phase A foundation:
+
+**`/server trends`** — Historical player-count sparkline via the CivInfo
+`mc-server-status/{server}/{period}` endpoint. Shows a 24h/hour/minute
+player-count chart with peak/low/average annotations. Complements
+`/server status` (live, via mcsrvstat.us) — trends show *when* CivMC is busy,
+not just *whether* it's up. Requires `CIVINFO_API_KEY` (shares the same auth
+as activity tracking). Cached 60s.
+
+**`/factory info|list|recipe`** — FactoryMod recipe lookup with **no API key
+needed**. The `factorymod.civinfo.net` website has no API — it's a static SPA
+that fetches `config.yml` directly from `github.com/CivMC/Civ`. We do the
+same: fetch the 482 KB YAML once per hour, cache it, and serve all 61 factories
++ 641 recipes from the cache. The cog auto-loads via `main.py`'s cog discovery.
+
+- `/factory info <name>` — setup cost (items + amounts) + recipe list.
+- `/factory list` — all 61 factories grouped by type (FCC, etc.).
+- `/factory recipe <id>` — inputs, outputs (with chances for RANDOM type),
+  and production time.
 
 ---
 
