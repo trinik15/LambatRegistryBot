@@ -1,11 +1,39 @@
+"""CivInfo API client — player activity + (future) server-status history.
+
+Phase A refactor (see research/civinfo-api-improvement-plan.md):
+  * Switched endpoint ``mc-sessions/all`` -> ``mc-accounts/full``. The new
+    endpoint returns ``first_joined``, ``last_login`` AND ``last_logout`` in
+    a single call (the old one only gave ``loginTimestamps``). We can now
+    detect "online right now" (``last_login > last_logout``) without a second
+    mcsrvstat.us call.
+  * Replaced the fragile ``(status, emoji, last_login, status_text)`` 4-tuple
+    with a frozen ``PlayerActivity`` dataclass. Callers access fields by name
+    (``pa.emoji``, ``pa.last_login``) instead of by positional index, so the
+    return type can grow without breaking every unpacker.
+  * Request hygiene: send ``civinfo-version: git:<hash>`` (matches Gjum's
+    official frontend, may help with rate-limit allowlisting), use the singular
+    ``mcName`` query param (not the legacy ``mcNames`` plural), and always pass
+    ``mcServer`` explicitly (the official frontend never omits it).
+
+The honest-degradation contract is unchanged: on 401/403 we set an auth-broken
+flag (TTL 10 min, warns once) so callers show "Activity data unavailable"
+instead of silently reporting fake "0 active" counts.
+"""
+
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
 
-CIVINFO_URL = "https://api.civinfo.net/mc-sessions/all"
+# --- Endpoint ---------------------------------------------------------------
+# Switched from mc-sessions/all (returns loginTimestamps/logoutTimestamps
+# parallel arrays) to mc-accounts/full (returns a single account object with
+# first_joined, last_login, last_logout). One call gives us 3× the data.
+# The base URL is configurable for testing; the path is fixed by the API.
+CIVINFO_ENDPOINT = "/mc-accounts/full"
 
 # How long to remember each kind of result.
 #   success      -> 5 min  (the data only changes when the player logs in)
@@ -22,13 +50,57 @@ CACHE_TTL_ERROR = 60
 AUTH_BROKEN_TTL = 600  # 10 min
 
 
+# --- PlayerActivity ---------------------------------------------------------
+# Replaces the old ``(status, emoji, last_login, status_text)`` 4-tuple.
+# Frozen + slots so it's immutable and cheap; callers access fields by name
+# (pa.emoji, pa.last_login) — no more fragile positional unpacking.
+@dataclass(frozen=True, slots=True)
+class PlayerActivity:
+    """A single player's CivMC activity, as returned by mc-accounts/full.
+
+    ``status`` is the internal result code (one of ``ok`` / ``not_found`` /
+    ``error``); callers should branch on it. ``emoji`` + ``status_text`` are
+    display-ready. ``last_login`` / ``last_logout`` / ``first_joined`` are
+    timezone-aware UTC datetimes, or ``None`` when unknown.
+
+    The ``is_online`` property derives "currently logged in" from
+    ``last_login > last_logout`` — no separate mcsrvstat.us call needed.
+    """
+
+    status: str
+    emoji: str
+    last_login: datetime | None
+    status_text: str
+    last_logout: datetime | None = None
+    first_joined: datetime | None = None
+
+    @property
+    def is_online(self) -> bool:
+        """True if the player is currently logged in (last_login > last_logout)."""
+        return bool(
+            self.last_login
+            and (not self.last_logout or self.last_login > self.last_logout)
+        )
+
+
+# Sentinel returned when the API is auth-broken and we don't want to re-hit it.
+# Module-level so callers can identity-check it if they want (most just read
+# .status == "error").
+def _auth_broken_result() -> PlayerActivity:
+    return PlayerActivity(
+        status="error", emoji="⚪", last_login=None, status_text="API Auth Required"
+    )
+
+
 class CivInfoCache:
-    def __init__(self, ttl_seconds=CACHE_TTL_SUCCESS):
-        self.cache = {}
+    """Per-IGN TTL cache. Each entry is a PlayerActivity + timestamp + ttl."""
+
+    def __init__(self, ttl_seconds: int = CACHE_TTL_SUCCESS):
+        self.cache: dict[str, tuple[PlayerActivity, float, int]] = {}
         self.ttl = ttl_seconds
 
-    def get(self, ign: str) -> tuple[str, str, datetime | None, str] | None:
-        """Return (status, emoji, last_login, status_text) if cached and fresh."""
+    def get(self, ign: str) -> PlayerActivity | None:
+        """Return the cached PlayerActivity if fresh, else None (evicting stale)."""
         if ign in self.cache:
             data, timestamp, ttl = self.cache[ign]
             if datetime.now(UTC).timestamp() - timestamp < ttl:
@@ -45,8 +117,8 @@ class CivInfoCache:
                 del self.cache[ign]
         return None
 
-    def set(self, ign: str, data: tuple[str, str, datetime | None, str], ttl: int | None = None):
-        """Store (status, emoji, last_login, status_text) with current timestamp.
+    def set(self, ign: str, data: PlayerActivity, ttl: int | None = None):
+        """Store a PlayerActivity with current timestamp.
 
         ``ttl`` overrides the default TTL — used to keep error / not_found
         results around for a shorter window so a transient CivInfo outage
@@ -116,12 +188,21 @@ def _clear_auth_broken():
     _auth_warned = False
 
 
-def _auth_headers():
-    """Build request headers, including the Bearer token if a key is set."""
+def _request_headers():
+    """Build request headers, including Bearer token + civinfo-version.
+
+    The ``civinfo-version`` header mirrors what Gjum's official frontend
+    (civmc.netlify.app) sends on every request. It's observational today
+    (analytics / allowlisting) but sending it future-proofs us against any
+    validation tightening.
+    """
     # Imported here to avoid a circular import at module load time.
     from core.config import Config
 
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "civinfo-version": f"git:{Config.CIVINFO_FRONTEND_VERSION}",
+    }
     if Config.CIVINFO_API_KEY:
         headers["Authorization"] = f"Bearer {Config.CIVINFO_API_KEY}"
     return headers
@@ -136,15 +217,51 @@ def _ttl_for(status: str) -> int:
     return CACHE_TTL_ERROR
 
 
+def _parse_ts(value) -> datetime | None:
+    """Parse a CivInfo timestamp (epoch-ms int/float, or None) into a UTC datetime.
+
+    The mc-accounts/full endpoint returns ``first_joined``, ``last_login``,
+    ``last_logout`` as epoch-millisecond integers (matching the old
+    loginTimestamps format). None / non-numeric values yield None.
+    """
+    if value is None:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value) / 1000.0, tz=UTC)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _bucket_activity(last_login: datetime) -> tuple[str, str]:
+    """Return (emoji, status_text) bucketed by days since last login.
+
+    🟢 Active    < 30 days
+    🟠 Semi      30-60 days
+    🔴 Inactive  > 60 days
+    """
+    days_ago = (datetime.now(UTC) - last_login).days
+    if days_ago < 30:
+        return "🟢", f"Active ({days_ago}d ago)" if days_ago > 0 else "Active (today)"
+    if days_ago < 60:
+        return "🟠", f"Semi-Inactive ({days_ago}d ago)"
+    return "🔴", f"Inactive ({days_ago}d ago)"
+
+
 async def get_player_activity(
     ign: str, session: aiohttp.ClientSession
-) -> tuple[str, str, datetime | None, str]:
-    """
-    Return a tuple (status, emoji, last_login, status_text)
-    status is one of: "ok", "not_found", "error"
+) -> PlayerActivity:
+    """Fetch a single player's CivMC activity via the mc-accounts/full endpoint.
 
-    On 401/403, marks the API as auth-broken (see ``is_auth_broken``) so
-    callers can degrade honestly instead of showing fake "0 active" counts.
+    Returns a :class:`PlayerActivity` with ``status`` one of:
+      * ``"ok"``        — account found; ``last_login`` / ``last_logout`` /
+        ``first_joined`` populated.
+      * ``"not_found"`` — account doesn't exist on CivMC (likely a typo).
+      * ``"error"``     — API failure (timeout, non-200, auth broken).
+
+    On 401/403, marks the API as auth-broken (see :func:`is_auth_broken`) so
+    callers degrade honestly instead of showing fake "0 active" counts.
+
+    Results are cached per-IGN with a status-dependent TTL.
     """
     cached = cache.get(ign)
     if cached:
@@ -154,30 +271,37 @@ async def get_player_activity(
     # honest "unavailable" result immediately. The cache TTL on these is
     # short so we retry periodically (via is_auth_broken's own TTL).
     if is_auth_broken():
-        result: tuple[str, str, datetime | None, str] = (
-            "error",
-            "⚪",
-            None,
-            "API Auth Required",
-        )
+        result = _auth_broken_result()
         cache.set(ign, result, ttl=_ttl_for("error"))
         return result
 
+    # Imported here to avoid a circular import at module load time.
+    from core.config import Config
+
+    url = f"{Config.CIVINFO_API_BASE}{CIVINFO_ENDPOINT}"
+
     try:
         async with session.get(
-            CIVINFO_URL, params={"mcNames": ign}, headers=_auth_headers()
+            url,
+            params={"mcName": ign, "mcServer": Config.CIVINFO_MC_SERVER},
+            headers=_request_headers(),
         ) as resp:
             if resp.status in (401, 403):
                 # Auth rejected (or no key set and the API now requires one).
                 # Mark broken so callers degrade honestly; don't spam the log.
                 _mark_auth_broken(f"HTTP {resp.status}")
-                result = ("error", "⚪", None, "API Auth Required")
+                result = _auth_broken_result()
                 cache.set(ign, result, ttl=_ttl_for("error"))
                 return result
 
             if resp.status != 200:
                 logger.debug(f"CivInfo API returned status {resp.status} for {ign}")
-                result = ("error", "⚪", None, f"API Error ({resp.status})")
+                result = PlayerActivity(
+                    status="error",
+                    emoji="⚪",
+                    last_login=None,
+                    status_text=f"API Error ({resp.status})",
+                )
                 cache.set(ign, result, ttl=_ttl_for("error"))
                 return result
 
@@ -185,52 +309,52 @@ async def get_player_activity(
             # A successful 200 means our auth works — clear any stale broken flag.
             _clear_auth_broken()
 
-            if not data or "mcNames" not in data or not data["mcNames"]:
-                logger.warning(f"No data for IGN {ign} from CivInfo")
-                result = ("not_found", "⚪", None, "Not Found")
-                cache.set(ign, result, ttl=_ttl_for("not_found"))
-                return result
-
-            timestamps = data.get("loginTimestamps", [])
-            if not timestamps:
-                logger.warning(f"No login timestamps for {ign}")
-                result = ("not_found", "⚪", None, "No Data")
-                cache.set(ign, result, ttl=_ttl_for("not_found"))
-                return result
-
-            # Filtra eventuali valori non numerici (es. None) che causerebbero errore in max()
-            valid_timestamps = [ts for ts in timestamps if isinstance(ts, (int, float))]
-            if not valid_timestamps:
-                logger.warning(f"Invalid timestamps for {ign}: {timestamps}")
-                result = ("error", "⚪", None, "Invalid Data")
-                cache.set(ign, result, ttl=_ttl_for("error"))
-                return result
-
-            last_ts = max(valid_timestamps) / 1000.0
-            last_date = datetime.fromtimestamp(last_ts, tz=UTC)
-            days_ago = (datetime.now(UTC) - last_date).days
-
-            if days_ago < 30:
-                emoji, text = (
-                    "🟢",
-                    f"Active ({days_ago}d ago)" if days_ago > 0 else "Active (today)",
+            # mc-accounts/full returns {"accounts": [{uuid, mc_name, first_joined,
+            # last_login, last_logout}]}. An empty list (or missing key) means
+            # the IGN doesn't exist on CivMC.
+            accounts = data.get("accounts") if isinstance(data, dict) else None
+            if not accounts:
+                logger.warning(f"No account data for IGN {ign} from CivInfo")
+                result = PlayerActivity(
+                    status="not_found", emoji="⚪", last_login=None, status_text="Not Found"
                 )
-            elif days_ago < 60:
-                emoji, text = "🟠", f"Semi-Inactive ({days_ago}d ago)"
-            else:
-                emoji, text = "🔴", f"Inactive ({days_ago}d ago)"
+                cache.set(ign, result, ttl=_ttl_for("not_found"))
+                return result
 
-            result = ("ok", emoji, last_date, text)
+            acct = accounts[0]
+            last_login = _parse_ts(acct.get("last_login"))
+            if not last_login:
+                # Account exists but has never logged in (or timestamp missing).
+                logger.warning(f"No last_login for {ign}: {acct}")
+                result = PlayerActivity(
+                    status="not_found", emoji="⚪", last_login=None, status_text="No Data"
+                )
+                cache.set(ign, result, ttl=_ttl_for("not_found"))
+                return result
+
+            emoji, text = _bucket_activity(last_login)
+            result = PlayerActivity(
+                status="ok",
+                emoji=emoji,
+                last_login=last_login,
+                status_text=text,
+                last_logout=_parse_ts(acct.get("last_logout")),
+                first_joined=_parse_ts(acct.get("first_joined")),
+            )
             cache.set(ign, result, ttl=_ttl_for("ok"))
             return result
 
     except TimeoutError:
         logger.warning(f"Timeout fetching CivInfo for {ign}")
-        result = ("error", "⚪", None, "Timeout")
+        result = PlayerActivity(
+            status="error", emoji="⚪", last_login=None, status_text="Timeout"
+        )
         cache.set(ign, result, ttl=_ttl_for("error"))
         return result
     except Exception as e:
         logger.error(f"Error fetching {ign}: {e}", exc_info=True)
-        result = ("error", "⚪", None, "Error")
+        result = PlayerActivity(
+            status="error", emoji="⚪", last_login=None, status_text="Error"
+        )
         cache.set(ign, result, ttl=_ttl_for("error"))
         return result

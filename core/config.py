@@ -52,12 +52,25 @@ class Config:
         os.getenv("COOLDOWN_CRITICAL", 120)
     )  # Very expensive ops (backup, restore)
 
-    # CivInfo API key (optional but recommended).
-    # The CivInfo API now requires authentication (contact
-    # minecraft.gjum@gmail.com for a key). When set, the bot sends it as a
-    # Bearer token. When unset or rejected, the bot degrades gracefully
-    # instead of silently reporting "0 active" citizens.
+    # CivInfo API (api.civinfo.net) — player activity + server-status history.
+    # The API requires authentication (contact minecraft.gjum@gmail.com for a
+    # key). When set, the bot sends it as a Bearer token. When unset or
+    # rejected, the bot degrades gracefully instead of silently reporting
+    # "0 active" citizens.
     CIVINFO_API_KEY = os.getenv("CIVINFO_API_KEY", "").strip()
+    # Base URL for the CivInfo API. Configurable so tests can point at a mock.
+    CIVINFO_API_BASE = os.getenv("CIVINFO_API_BASE", "https://api.civinfo.net").strip()
+    # The mcServer value sent on every CivInfo request. The official frontend
+    # (civmc.netlify.app) uses the full server address "play.civmc.net", not the
+    # short form "civmc". We align with the frontend to avoid surprising the
+    # backend's validation/routing.
+    CIVINFO_MC_SERVER = os.getenv("CIVINFO_MC_SERVER", "play.civmc.net").strip()
+    # The civinfo-version header value sent on every request (mirrors Gjum's
+    # official frontend). Observational today (analytics / allowlisting); update
+    # to match the latest frontend release if Gjum ever makes it required.
+    CIVINFO_FRONTEND_VERSION = os.getenv(
+        "CIVINFO_FRONTEND_VERSION", "1189803c19bf94a23f86a15d9ef2ab9f7654b929"
+    ).strip()
 
     # --- CivMC server status (mcsrvstat.us, no auth required) ---
     # The Minecraft server address polled by /server status and the uptime

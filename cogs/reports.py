@@ -111,10 +111,19 @@ class ReportsCog(commands.Cog):
             activity_data = {}
             for citizen in citizens:
                 ign = citizen["ign"]
-                status, emoji, last_login, status_text = activities.get(
-                    ign, ("error", "⚪", None, "Error")
-                )
-                activity_data[ign] = {"emoji": emoji, "status": status_text, "raw_status": status}
+                pa = activities.get(ign)
+                if pa is None:
+                    # Shouldn't happen — _fetch_activities covers every IGN —
+                    # but degrade gracefully rather than crashing the report.
+                    from api.civinfo_api import PlayerActivity
+                    pa = PlayerActivity(
+                        status="error", emoji="⚪", last_login=None, status_text="Error"
+                    )
+                activity_data[ign] = {
+                    "emoji": pa.emoji,
+                    "status": pa.status_text,
+                    "raw_status": pa.status,
+                }
 
             # civinfo_api returns emoji 🟢 (active <30d), 🟠 (semi 30-60d),
             # 🔴 (inactive >60d), ⚪ (unknown/error). The status_text is never
@@ -389,7 +398,8 @@ class ReportsCog(commands.Cog):
             rows = await db.execute_query(
                 "SELECT c.ign, c.discord_id, c.settlement, c.join_date, "
                 "c.address, c.mailbox, c.recruiter_ids, c.notes, "
-                "ac.status as activity_status, ac.last_login "
+                "ac.status as activity_status, ac.last_login, "
+                "ac.last_logout, ac.first_joined, ac.is_online "
                 "FROM citizens c LEFT JOIN activity_cache ac ON ac.ign = c.ign "
                 "ORDER BY c.settlement, c.ign",
                 fetch_all=True,
@@ -412,8 +422,8 @@ class ReportsCog(commands.Cog):
             missing_igns = [r["ign"] for r in rows if not r.get("activity_status")]
             if missing_igns:
                 activities = await _fetch_activities(missing_igns, self.bot.http_session)
-                for ign, (status, _emoji, _last_login, _text) in activities.items():
-                    activity_map[ign] = _activity_label(status)
+                for ign, pa in activities.items():
+                    activity_map[ign] = _activity_label(pa)
 
         # Create CSV in memory
         output = io.StringIO()
@@ -445,7 +455,15 @@ class ReportsCog(commands.Cog):
             ]
             if include_activity:
                 status = row.get("activity_status") or activity_map.get(row["ign"], "Unknown")
-                line.append(_activity_label(status) if len(status) > 2 else status)
+                # status may be a raw code ('ok'/'not_found'/'error' from the DB),
+                # a legacy code ('active'/'semi'/'inactive'), OR an already-
+                # resolved label ('Active'/'Semi-Active'/...) from activity_map.
+                # _activity_label handles all three; pass-through if it's already
+                # a label (len > 2 and not a known raw code).
+                if status in {"ok", "not_found", "error", "active", "semi", "inactive", "unknown"}:
+                    line.append(_activity_label(status))
+                else:
+                    line.append(status)
             writer.writerow(line)
 
         output.seek(0)
@@ -610,21 +628,38 @@ async def setup(bot):
 # ---------------------------------------------------------------------------
 
 
-def _activity_label(status: str) -> str:
-    """Map a CivInfo activity status code to a human-readable CSV label.
+def _activity_label(pa) -> str:
+    """Map a PlayerActivity to a human-readable CSV label.
 
-    CivInfo returns: 'active' (<30d), 'semi' (30-60d), 'inactive' (>60d),
-    'unknown' (no data), 'error' (API failure). The activity_cache stores
-    the raw status; we map it to the label leadership expects in exports.
+    Phase A (WS-3, fix B1): the old mapping expected 'active'/'semi'/'inactive'
+    but :func:`civinfo_api.get_player_activity` returns 'ok'/'not_found'/'error'
+    as the status — so live-fetch labels always fell through to "Unknown".
+    Now we derive the label from the emoji (which IS the bucket signal) when
+    status is ``ok``, and map ``not_found`` / ``error`` directly.
     """
-    mapping = {
+    # Accept either a PlayerActivity or a raw status string for backward compat
+    # (the activity_cache column stores the raw status code; the LEFT JOIN in
+    # report_export passes a string, not a PlayerActivity).
+    if isinstance(pa, str):
+        status = pa
+        emoji = None
+    else:
+        status = pa.status
+        emoji = pa.emoji
+
+    if status == "error":
+        return "Error"
+    if status == "not_found":
+        return "Not Found"
+    if status == "ok":
+        # Derive from the emoji — the bucket logic in civinfo_api._bucket_activity
+        # is the single source of truth for Active/Semi/Inactive.
+        return {"🟢": "Active", "🟠": "Semi-Active", "🔴": "Inactive"}.get(emoji or "", "Unknown")
+    # Legacy raw values stored in activity_cache from older code paths.
+    legacy = {
         "active": "Active",
         "semi": "Semi-Active",
         "inactive": "Inactive",
         "unknown": "Unknown",
-        "error": "Error",
     }
-    # If the status is already a label (from a live fetch), return as-is.
-    if status in mapping.values():
-        return status
-    return mapping.get(status, "Unknown")
+    return legacy.get(status, "Unknown")

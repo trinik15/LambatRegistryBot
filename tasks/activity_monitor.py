@@ -23,8 +23,9 @@ CIVINFO_CONCURRENCY = 5
 async def _fetch_activities(igns, session):
     """Fetch CivInfo activity for many IGNs concurrently.
 
-    Returns ``{ign: (status, emoji, last_login, status_text)}``.
-    Bounded by a semaphore so we don't fire hundreds of requests at once.
+    Returns ``{ign: PlayerActivity}`` — a dict mapping each IGN to its
+    :class:`api.civinfo_api.PlayerActivity`. Bounded by a semaphore so we
+    don't fire hundreds of requests at once.
     """
     sem = asyncio.Semaphore(CIVINFO_CONCURRENCY)
 
@@ -34,6 +35,48 @@ async def _fetch_activities(igns, session):
 
     results = await asyncio.gather(*(_one(ign) for ign in igns), return_exceptions=False)
     return dict(results)
+
+
+async def _persist_activities(activities: dict) -> int:
+    """Upsert a batch of PlayerActivity results into the activity_cache table.
+
+    Called by the daily loop after a batch fetch, so /metrics ACTIVE_CITIZENS
+    and /report export's LEFT JOIN reflect the latest CivInfo data (not just
+    rows written by /citizen add).
+
+    Only rows with ``status == "ok"`` (a real last_login) are persisted —
+    ``not_found`` / ``error`` results are skipped to avoid overwriting a known-
+    good row with a transient failure. Returns the number of rows upserted.
+    """
+    if not activities:
+        return 0
+    pool = await db.get_pool()
+    rows_upserted = 0
+    async with pool.acquire() as conn:
+        for ign, pa in activities.items():
+            if pa.status != "ok" or not pa.last_login:
+                continue
+            await conn.execute(
+                "INSERT INTO activity_cache "
+                "(ign, last_login, last_logout, first_joined, status, is_online) "
+                "VALUES ($1, $2, $3, $4, $5, $6) "
+                "ON CONFLICT (ign) DO UPDATE SET "
+                "last_login = EXCLUDED.last_login, "
+                "last_logout = EXCLUDED.last_logout, "
+                "first_joined = EXCLUDED.first_joined, "
+                "status = EXCLUDED.status, "
+                "is_online = EXCLUDED.is_online, "
+                "last_checked = CURRENT_TIMESTAMP",
+                ign,
+                pa.last_login,
+                pa.last_logout,
+                pa.first_joined,
+                pa.status,
+                pa.is_online,
+            )
+            rows_upserted += 1
+    logger.info(f"Persisted {rows_upserted} activity_cache rows from daily refresh.")
+    return rows_upserted
 
 
 # NOTE: SETTLEMENT_TO_DUCHY was a hardcoded dict mapping each settlement to
@@ -67,7 +110,15 @@ class ActivityMonitor:
             #    (concurrent + bounded by a semaphore — was sequential with a
             #     0.5s sleep per citizen, which took minutes on big registries).
             session = self.bot.http_session
-            await _fetch_activities([row["ign"] for row in citizens], session)
+            activities = await _fetch_activities([row["ign"] for row in citizens], session)
+
+            # Phase A (WS-3, fix B2): persist the refreshed activity to the
+            # activity_cache DB table. Previously the daily loop only updated
+            # the in-memory cache, so /metrics ACTIVE_CITIZENS and /report
+            # export's LEFT JOIN only reflected rows written by /citizen add —
+            # not the daily refresh. Now every successful fetch is upserted,
+            # so the gauge and export are always current.
+            await _persist_activities(activities)
 
             # 2. Se è il primo del mese → genera report mensile
             if today.day == 1:  # solo il primo giorno del mese
@@ -138,8 +189,10 @@ class ActivityMonitor:
         district_to_duchy: dict[str, str] = {c["settlement"]: c["duchy"] for c in citizens}
 
         for c in citizens:
-            _, emoji, _, _ = activities.get(c["ign"], ("error", "⚪", None, "Error"))
-            is_active = emoji == "🟢"
+            pa = activities.get(c["ign"])
+            # Default to an error sentinel if the IGN wasn't fetched (shouldn't
+            # happen — _fetch_activities covers every IGN — but be defensive).
+            is_active = (pa.emoji == "🟢") if pa else False
 
             district = c["settlement"]
             duchy = c["duchy"]

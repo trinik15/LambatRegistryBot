@@ -288,13 +288,12 @@ class CitizenCog(commands.Cog):
                 # not CivInfo) and surface a warning so council knows the
                 # activity wasn't verified.
                 civinfo_warning = None
-                status, emoji, last_login, status_text = await civinfo_api.get_player_activity(
+                pa = await civinfo_api.get_player_activity(
                     ign, self.bot.http_session
                 )
-                if status == "error":
-                    civinfo_warning = status_text or "CivInfo unavailable"
-                    last_login = None
-                elif status == "not_found":
+                if pa.status == "error":
+                    civinfo_warning = pa.status_text or "CivInfo unavailable"
+                elif pa.status == "not_found":
                     await interaction.followup.send(
                         "❌ IGN not found on CivInfo. Please check the name and try again.",
                         ephemeral=True,
@@ -318,13 +317,24 @@ class CitizenCog(commands.Cog):
                 # (source of truth). recruiter_ids stays as a denormalised cache.
                 await recruiters_svc.set_recruiters(ign, recruiters, connection=conn)
 
-                if last_login:
+                if pa.last_login:
                     await conn.execute(
-                        "INSERT INTO activity_cache (ign, last_login, status) VALUES ($1, $2, $3) "
-                        "ON CONFLICT (ign) DO UPDATE SET last_login = EXCLUDED.last_login, status = EXCLUDED.status, last_checked = CURRENT_TIMESTAMP",
+                        "INSERT INTO activity_cache "
+                        "(ign, last_login, last_logout, first_joined, status, is_online) "
+                        "VALUES ($1, $2, $3, $4, $5, $6) "
+                        "ON CONFLICT (ign) DO UPDATE SET "
+                        "last_login = EXCLUDED.last_login, "
+                        "last_logout = EXCLUDED.last_logout, "
+                        "first_joined = EXCLUDED.first_joined, "
+                        "status = EXCLUDED.status, "
+                        "is_online = EXCLUDED.is_online, "
+                        "last_checked = CURRENT_TIMESTAMP",
                         ign,
-                        last_login,
-                        status,
+                        pa.last_login,
+                        pa.last_logout,
+                        pa.first_joined,
+                        pa.status,
+                        pa.is_online,
                     )
 
                 # Phase 2.1: audit the add inside the transaction so it's
@@ -627,7 +637,9 @@ class CitizenCog(commands.Cog):
                 connection=conn,
             )
 
-        civinfo_api.cache.cache.pop(ign, None)
+        # Phase A (WS-3, fix B4): use the public invalidate() method instead
+        # of reaching into the cache's internal dict.
+        civinfo_api.cache.invalidate(ign)
         self.autocomplete_cache.invalidate_citizen_cache()
 
         # Phase 2.1: mirror to the audit channel (best-effort, post-commit).
@@ -812,7 +824,7 @@ class CitizenCog(commands.Cog):
             await interaction.followup.send(f"❌ No citizen with IGN `{ign}`.")
             return
 
-        status, emoji, last_login, status_text = await civinfo_api.get_player_activity(
+        pa = await civinfo_api.get_player_activity(
             ign, self.bot.http_session
         )
 
@@ -826,11 +838,11 @@ class CitizenCog(commands.Cog):
         embed.add_field(name="Address", value=row["address"], inline=False)
         embed.add_field(name="Mailbox", value=row["mailbox"], inline=True)
         embed.add_field(name="Recruiters", value=recruiter_mentions, inline=True)
-        embed.add_field(name="Activity", value=f"{emoji} {status_text}", inline=True)
-        if last_login:
+        embed.add_field(name="Activity", value=f"{pa.emoji} {pa.status_text}", inline=True)
+        if pa.last_login:
             embed.add_field(
                 name="Last Login",
-                value=utils.format_date(last_login, "%Y-%m-%d %H:%M"),
+                value=utils.format_date(pa.last_login, "%Y-%m-%d %H:%M"),
                 inline=True,
             )
         if row["notes"] != "None":

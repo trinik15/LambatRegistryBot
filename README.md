@@ -223,6 +223,28 @@ into CivMC. The API now **requires authentication**. To get a key:
   instead of fake "0 active" counts.
 - `/citizen dossier` shows ⚪ "API Auth Required" for activity.
 
+### Phase A: mc-accounts/full endpoint + richer activity data
+
+The bot now calls the **`mc-accounts/full`** endpoint (instead of the legacy
+`mc-sessions/all`). One call returns `first_joined`, `last_login`, AND
+`last_logout` — giving us three capabilities we didn't have before:
+
+- **"Online now" detection** — `last_login > last_logout` means the player is
+  currently logged in, with no separate mcsrvstat.us call needed.
+- **First-joined date** — when the player first joined CivMC (distinct from
+  our registry `join_date`, which is when they joined Lambat).
+- **Accurate activity metrics** — the daily activity loop now persists to the
+  `activity_cache` DB table (previously only the in-memory cache was refreshed,
+  so the `ACTIVE_CITIZENS` Prometheus gauge and `/report export` were stale).
+
+Additional env vars (all have sensible defaults — only override for testing):
+- `CIVINFO_API_BASE` — defaults to `https://api.civinfo.net`.
+- `CIVINFO_MC_SERVER` — defaults to `play.civmc.net` (the full server address,
+  matching Gjum's official frontend — not the short form `civmc`).
+- `CIVINFO_FRONTEND_VERSION` — the `civinfo-version` header git hash, sent on
+  every request to mirror the official frontend. Observational today; update
+  if Gjum ever makes it required.
+
 ---
 
 ## Deployment
