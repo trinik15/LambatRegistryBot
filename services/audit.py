@@ -48,6 +48,7 @@ SETTLEMENT_REMOVE = "settlement.remove"
 ROLE_SYNC_DISCREPANCY = "role_sync.discrepancy"
 ROLE_SYNC_FIXED = "role_sync.fixed"
 EMOJI_SET = "emoji.set"
+SNAPSHOT_ANNOTATE = "snapshot.annotate"
 
 ALL_ACTIONS = (
     CITIZEN_ADD,
@@ -58,6 +59,7 @@ ALL_ACTIONS = (
     ROLE_SYNC_DISCREPANCY,
     ROLE_SYNC_FIXED,
     EMOJI_SET,
+    SNAPSHOT_ANNOTATE,
 )
 
 
@@ -313,6 +315,7 @@ def _action_label(action: str) -> str:
         ROLE_SYNC_DISCREPANCY: "Role discrepancy",
         ROLE_SYNC_FIXED: "Role auto-fixed",
         EMOJI_SET: "Emoji updated",
+        SNAPSHOT_ANNOTATE: "Snapshot annotated",
     }.get(action, action)
 
 
@@ -320,7 +323,7 @@ def _action_color(action: str) -> int:
     """Green for creates, orange for updates/removes, blue for ops, grey for sync."""
     if action in (CITIZEN_ADD, SETTLEMENT_ADD, EMOJI_SET):
         return 0x43B581  # green
-    if action in (CITIZEN_UPDATE,):
+    if action in (CITIZEN_UPDATE, SNAPSHOT_ANNOTATE):
         return 0x5865F2  # blurple
     if action in (CITIZEN_REMOVE, SETTLEMENT_REMOVE, ROLE_SYNC_DISCREPANCY):
         return 0xFF9900  # orange

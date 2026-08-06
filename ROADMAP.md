@@ -175,7 +175,10 @@ M ≈ 1–2 days, L ≈ 3–5 days) and assume a single contributor who knows di
 > ✅ Phase 3 **implemented** — CSV import, citizen search, settlement dashboard,
 > self-service applications, activity time-series + activity export, governance
 > notifications, CivMC online-now list (168 tests, all green).
-> Phases 4–5 remain planned.
+> ✅ Phase 4 **implemented** — SIGTERM graceful shutdown, Dockerfile HEALTHCHECK,
+> rate-limit-aware bulk role ops, DejaVu Sans chart font, i18n scaffolding (en +
+> partial fil), snapshot annotations + `/snapshot annotate|list|clear` (294 tests,
+> all green). Phase 5 remains planned.
 
 ### Phase 0 — Stabilize & de-risk (before adding anything new)
 
@@ -303,21 +306,71 @@ leadership has per-settlement and per-citizen activity dashboards. — **MET**
 
 ---
 
-### Phase 4 — Hardening & ops polish
+### Phase 4 — Hardening & ops polish  ✅ COMPLETE
 
 **Goal:** production-grade operational behaviour.
 
-| ID | Task | Effort | Touches |
-|---|---|---|---|
-| **4.1** | **SIGTERM graceful shutdown.** Install a `signal.signal(SIGTERM, ...)` that cancels loops and calls `bot.close()`, so container orchestrators get a clean exit. Add `stop_timeout` for in-flight commands. | S | `main.py` |
-| **4.2** | **Dockerfile `HEALTHCHECK`.** `HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT}/healthz').read()"` — uses the real `/healthz` from Phase 0.3. | S | `Dockerfile` |
-| **4.3** | **Discord-rate-limit-aware bulk operations.** Wrap `role_manager` calls in a shared `discord_rate_limit_guard` that respects `bot.is_ws_ratelimited()` and backs off, so bulk import (3.1) doesn't get the bot rate-limited. | M | `services/role_manager.py` |
-| **4.4** | **Matplotlib font with full Latin/Filipino glyph coverage.** Bundle a font (e.g. DejaVu Sans, which ships with matplotlib) explicitly via `font.family` rcParam; verify "ñ", "ü", accented settlement names render. | S | `services/charts.py` |
-| **4.5** | **i18n scaffolding.** Extract user-facing strings to a `locales/{en,fil}.json` with a `tr(key, **kwargs)` helper. Start with `/help` and the monthly report (the two highest-visibility surfaces). Filipino is a stretch goal; the scaffolding is the valuable part. | L | new `core/i18n.py`, `cogs/help.py`, `tasks/activity_monitor.py` |
-| **4.6** | **Snapshot annotations.** Add `notes TEXT` to `monthly_snapshots` and an optional `/snapshot annotate <date> <text>` (Council) so historical context survives. | S | `core/database.py`, new `cogs/snapshot.py` |
+| ID | Task | Effort | Touches | Status |
+|---|---|---|---|---|
+| **4.1** | **SIGTERM graceful shutdown.** Install a `signal.signal(SIGTERM, ...)` that cancels loops and calls `bot.close()`, so container orchestrators get a clean exit. Add `stop_timeout` for in-flight commands. | S | `main.py` | ✅ |
+| **4.2** | **Dockerfile `HEALTHCHECK`.** `HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:${PORT}/healthz').read()"` — uses the real `/healthz` from Phase 0.3. | S | `Dockerfile` | ✅ |
+| **4.3** | **Discord-rate-limit-aware bulk operations.** Wrap `role_manager` calls in a shared `discord_rate_limit_guard` that respects `bot.is_ws_ratelimited()` and backs off, so bulk import (3.1) doesn't get the bot rate-limited. | M | `services/role_manager.py` | ✅ |
+| **4.4** | **Matplotlib font with full Latin/Filipino glyph coverage.** Bundle a font (e.g. DejaVu Sans, which ships with matplotlib) explicitly via `font.family` rcParam; verify "ñ", "ü", accented settlement names render. | S | `services/charts.py` | ✅ |
+| **4.5** | **i18n scaffolding.** Extract user-facing strings to a `locales/{en,fil}.json` with a `tr(key, **kwargs)` helper. Start with `/help` and the monthly report (the two highest-visibility surfaces). Filipino is a stretch goal; the scaffolding is the valuable part. | L | new `core/i18n.py`, `cogs/help.py`, `tasks/activity_monitor.py` | ✅ |
+| **4.6** | **Snapshot annotations.** Add `notes TEXT` to `monthly_snapshots` and an optional `/snapshot annotate <date> <text>` (Council) so historical context survives. | S | `core/database.py`, new `cogs/snapshot.py` | ✅ |
 
 **Exit criteria:** clean container shutdown; honest Docker health; bulk ops don't trip
-rate limits; charts render all settlement names correctly.
+rate limits; charts render all settlement names correctly. — **MET**
+
+**What shipped:**
+- `main.py` installs SIGTERM + SIGINT handlers via `loop.add_signal_handler`
+  (Unix) with a `signal.signal()` thread-based fallback for Windows. The
+  handlers schedule `bot.close()` on the event loop; the close is bounded by
+  `SHUTDOWN_GRACE_SECONDS` (default 15s) via `asyncio.wait_for` so a stuck DB
+  pool close or hung gateway logout never traps the container past its grace
+  period (which would trigger a SIGKILL — losing log flushes). A second signal
+  force-exits immediately so a stuck shutdown never traps the operator.
+  `Config.validate_config` enforces `SHUTDOWN_GRACE_SECONDS >= 3`.
+- `Dockerfile` gains a `HEALTHCHECK` that probes the real `/healthz` endpoint
+  (Phase 0.3) — returns 200 only when the Discord gateway is connected AND the
+  DB pool is live. Uses `python -c urllib` (already in the image, no apt
+  package). `--start-period=15s --interval=30s --timeout=5s --retries=3`.
+- `services/role_manager.py` gains `rate_limit_guard(bot, *, max_wait=30,
+  poll=0.5)` async context manager that checks `bot.is_ws_ratelimited()` and
+  backs off before yielding. Wired into the weekly `role_sync` loop (the live
+  bulk path) so a large registry doesn't trip a 429 mid-batch. Tolerates test
+  mocks without `is_ws_ratelimited` (defensive `getattr`).
+- `services/charts.py` pins `font.family` to `DejaVu Sans` (ships with
+  matplotlib, covers Latin-1 + Latin Extended-A — every Filipino glyph + every
+  accented European settlement name). Removes the host-dependent default-font
+  failure mode where a stripped matplotlib config could render tofu boxes for
+  "ñ"/"ü". `CHART_FONT_FAMILY` constant exported for tests.
+- `core/i18n.py` — lazy-loaded locale tables from `locales/{en,fil}.json`,
+  `tr(key, lang=None, **kwargs)` with en fallback chain, `available_langs()`,
+  `reload_for_tests()`. No exceptions (malformed templates + missing keys log +
+  return best-available). `Config.LOCALE` (env `LOCALE`, default `en`).
+- `locales/en.json` (32 keys: full `/help` embed + monthly report headers) +
+  `locales/fil.json` (28 keys: full `/help` translated to Filipino — the
+  stretch-goal surface; monthly report keys fall back to en).
+- `cogs/help.py` refactored: every user-facing string goes through `tr()`.
+  Setting `LOCALE=fil` renders the entire `/help` embed in Filipino.
+- `tasks/activity_monitor.py` monthly report: title, summary lines, and 4
+  section headers go through `tr()` with named-field interpolation.
+- `core/database.py` — `monthly_snapshots.notes TEXT` added to the fresh-install
+  CREATE TABLE + idempotent `ALTER TABLE ... ADD COLUMN IF NOT EXISTS notes`
+  for existing installs.
+- `cogs/snapshot.py` (new) — `/snapshot annotate <date> <note>`,
+  `/snapshot list`, `/snapshot clear <date>`. Council-only. Audited via the new
+  `audit.SNAPSHOT_ANNOTATE` action. Pure embed-builder helpers
+  (`_build_annotate_embed`, `_build_list_embed`, `_build_clear_embed`,
+  `_format_list_line`) extracted for testability.
+- `cogs/reports.py` `/report trends` now surfaces any annotation on the latest
+  snapshot as a `📝 Annotation` field.
+- `services/audit.py` — `SNAPSHOT_ANNOTATE = "snapshot.annotate"` action
+  constant + label ("Snapshot annotated") + blurple color.
+- 39 new tests (rate_limit_guard back-off paths, i18n fallback chain +
+  interpolation + locale-file validity, snapshot embed builders + truncation,
+  chart font glyph coverage + render-with-ñü). Total: 294 passing.
 
 ---
 

@@ -101,6 +101,7 @@ async def init_db():
                         district TEXT,
                         total INTEGER NOT NULL,
                         active INTEGER NOT NULL,
+                        notes TEXT,
                         UNIQUE(snapshot_date, duchy, district)
                     )
                 """)
@@ -268,6 +269,17 @@ async def init_db():
                     "UPDATE activity_cache SET is_online = TRUE "
                     "WHERE last_login IS NOT NULL "
                     "AND (last_logout IS NULL OR last_login > last_logout)"
+                )
+
+                # --- Phase 4.6: monthly_snapshots.notes ---
+                # Adds a free-text ``notes`` column so leadership can annotate
+                # historical snapshots with context ("snapshot taken during the
+                # Great Diamond Crisis week", "post-exodus census", etc.). The
+                # monthly report auto-saves rows with notes=NULL; the new
+                # ``/snapshot annotate`` command (cogs/snapshot.py) sets the
+                # value for a given date. Idempotent — re-running is a no-op.
+                await conn.execute(
+                    "ALTER TABLE monthly_snapshots ADD COLUMN IF NOT EXISTS notes TEXT"
                 )
 
                 # join_date TEXT (DD/MM/YYYY) -> DATE

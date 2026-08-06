@@ -30,6 +30,18 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.dates import DateFormatter  # noqa: E402
 
+# Phase 4.4: explicit font with full Latin + Filipino glyph coverage.
+# Lambat uses Filipino names ("Mabuhay", "Kahiran ng Lambat") and accented
+# settlement names ("Tierra del Cabo", "Bazariskes", "Florraine"). The default
+# matplotlib font (DejaVu Sans on most installs) actually covers these, but it's
+# only the default by convention — a host with a stripped matplotlib config
+# could fall back to a missing-glyph font and render tofu boxes for "ñ"/"ü".
+# Pinning font.family explicitly removes that host-dependent failure mode.
+# DejaVu Sans ships with matplotlib (no system font install needed) and covers
+# the full Latin-1 + Latin Extended-A range, which includes every glyph used by
+# Filipino (Latin alphabet + ñ + ü) and the accented European settlement names.
+CHART_FONT_FAMILY = "DejaVu Sans"
+
 # CivMC-ish palette (green = active/growth, red = inactive/decline, blue =
 # neutral totals). Avoids indigo/blue per project styling rules.
 COLOR_TOTAL = "#5865F2"  # discord blurple — for total population
@@ -44,6 +56,7 @@ def _apply_dark_style():
     """Apply a Discord-dark-friendly style so charts look good in embeds."""
     plt.rcParams.update(
         {
+            "font.family": CHART_FONT_FAMILY,
             "figure.facecolor": COLOR_BG,
             "axes.facecolor": COLOR_BG,
             "axes.edgecolor": COLOR_GRID,

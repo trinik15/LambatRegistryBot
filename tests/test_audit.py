@@ -28,9 +28,17 @@ def test_all_actions_complete_and_stable():
     assert audit.ROLE_SYNC_DISCREPANCY == "role_sync.discrepancy"
     assert audit.ROLE_SYNC_FIXED == "role_sync.fixed"
     assert audit.EMOJI_SET == "emoji.set"
-    assert len(audit.ALL_ACTIONS) == 8
+    assert audit.SNAPSHOT_ANNOTATE == "snapshot.annotate"
+    assert len(audit.ALL_ACTIONS) == 9
     # No duplicates.
-    assert len(set(audit.ALL_ACTIONS)) == 8
+    assert len(set(audit.ALL_ACTIONS)) == 9
+
+
+def test_snapshot_annotate_has_label_and_color():
+    """Phase 4.6: the new action renders in the audit embed."""
+    assert audit._action_label(audit.SNAPSHOT_ANNOTATE) == "Snapshot annotated"
+    # Blurple (same as citizen.update — it's an update-class op).
+    assert audit._action_color(audit.SNAPSHOT_ANNOTATE) == 0x5865F2
 
 
 # ---------------------------------------------------------------------------

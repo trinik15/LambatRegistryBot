@@ -43,6 +43,24 @@ class Config:
     AIOHTTP_TOTAL_TIMEOUT = int(os.getenv("AIOHTTP_TOTAL_TIMEOUT", 5))
     AIOHTTP_CONNECT_TIMEOUT = int(os.getenv("AIOHTTP_CONNECT_TIMEOUT", 3))
 
+    # Phase 4.1: graceful shutdown grace period (seconds). When the container
+    # orchestrator sends SIGTERM, the bot begins an orderly shutdown — cancel
+    # loops, close the HTTP session, close the DB pool, close the gateway. This
+    # value is the HARD ceiling for the whole shutdown sequence: if it's
+    # exceeded, we force-exit so the orchestrator never has to SIGKILL us (a
+    # SIGKILL would lose in-flight log flushes + leave the gateway session
+    # dangling). 15s matches Render's default grace; Docker's default is 10s —
+    # set this a couple seconds BELOW your orchestrator's grace to be safe.
+    SHUTDOWN_GRACE_SECONDS = int(os.getenv("SHUTDOWN_GRACE_SECONDS", 15))
+
+    # Phase 4.5: default UI language for i18n (core/i18n.tr). ``en`` is the
+    # only fully-translated locale today; ``fil`` is a partial stretch goal
+    # (Lambat is Filipino-themed). Individual tr() calls can override per-
+    # message if a future per-user locale preference is added. The value must
+    # match a file stem in ``locales/`` (without the .json), else tr() falls
+    # back to English.
+    LOCALE = os.getenv("LOCALE", "en").strip().lower()
+
     # Cooldown configuration (in seconds)
     # These define per-user rate limits for different command categories
     COOLDOWN_FAST = int(os.getenv("COOLDOWN_FAST", 5))  # Quick commands (view, list)
@@ -180,6 +198,13 @@ class Config:
             raise ValueError("AIOHTTP_CONNECT_TIMEOUT must be positive.")
         if cls.AIOHTTP_CONNECT_TIMEOUT >= cls.AIOHTTP_TOTAL_TIMEOUT:
             raise ValueError("AIOHTTP_CONNECT_TIMEOUT must be less than AIOHTTP_TOTAL_TIMEOUT.")
+
+        # Phase 4.1: shutdown grace must be at least 3s — anything less risks
+        # an incomplete close (loops not cancelled, DB pool not released) and
+        # defeats the purpose of graceful shutdown. The container will just
+        # SIGKILL us anyway in that case.
+        if cls.SHUTDOWN_GRACE_SECONDS < 3:
+            raise ValueError("SHUTDOWN_GRACE_SECONDS must be at least 3 seconds.")
 
         # Validate cooldown values
         if any(
