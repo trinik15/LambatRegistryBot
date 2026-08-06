@@ -67,7 +67,8 @@ async def _persist_activities(activities: dict) -> int:
                 "first_joined = EXCLUDED.first_joined, "
                 "status = EXCLUDED.status, "
                 "is_online = EXCLUDED.is_online, "
-                "last_checked = CURRENT_TIMESTAMP",
+                "last_checked = CURRENT_TIMESTAMP, "
+                "stale = FALSE",
                 ign,
                 pa.last_login,
                 pa.last_logout,
@@ -78,6 +79,55 @@ async def _persist_activities(activities: dict) -> int:
             rows_upserted += 1
     logger.info(f"Persisted {rows_upserted} activity_cache rows from daily refresh.")
     return rows_upserted
+
+
+async def mark_all_stale() -> int:
+    """Flag every activity_cache row as stale (CivInfo auth broken).
+
+    Called by ``daily_check`` after a batch that couldn't refresh because CivInfo
+    rejected auth. Sets ``stale = TRUE`` on all rows WITHOUT touching
+    ``last_login`` (the cached value stays as the last known good, just flagged
+    as aging). Returns the number of rows marked.
+
+    Proposal 1 (CivInfo graceful degradation): this is the honest-degradation
+    valve. Without it, ``last_login`` silently ages during a CivInfo outage and
+    readers (the churn-alert task, the /metrics active-citizens gauge) act on
+    stale data as if it were current. The ``stale`` flag lets those readers
+    skip stale rows so a recruiter isn't nudged about a citizen who actually
+    logged in recently (CivInfo just couldn't tell us).
+    """
+    pool = await db.get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute("UPDATE activity_cache SET stale = TRUE")
+        try:
+            return int(result.rsplit(" ", 1)[-1])
+        except (ValueError, IndexError):
+            logger.warning(f"Could not parse UPDATE row count from status {result!r}")
+            return 0
+
+
+async def _fetch_mcsrvstat_player_count(session) -> int | None:
+    """Fetch the CivMC aggregate online-player count from mcsrvstat.us.
+
+    Used only for the staleness warning log (context: "server up, N online")
+    when CivInfo is auth-broken — we can't get per-citizen data (ROADMAP §8.5:
+    CivMC hides its player sample), but the aggregate count confirms the server
+    is alive. Returns None on any failure (the warning logs "server
+    unreachable"). No auth needed; ~40ms.
+    """
+    url = f"{Config.MCSRVSTAT_API_BASE}/{Config.SERVER_ADDRESS}"
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+            if not data.get("online"):
+                return 0
+            players = data.get("players") or {}
+            return int(players.get("online", 0))
+    except Exception as e:  # noqa: BLE001 — context-only; never break daily_check
+        logger.debug(f"mcsrvstat player-count fetch failed (context only): {e}")
+        return None
 
 
 # NOTE: SETTLEMENT_TO_DUCHY was a hardcoded dict mapping each settlement to
@@ -120,6 +170,32 @@ class ActivityMonitor:
             # not the daily refresh. Now every successful fetch is upserted,
             # so the gauge and export are always current.
             await _persist_activities(activities)
+
+            # Proposal 1 (CivInfo graceful degradation): if CivInfo auth is
+            # broken, the batch above persisted nothing (every pa.status was
+            # "error"/"auth-broken"). Flag every activity_cache row as stale so
+            # readers (churn alerts, /metrics) skip aging last_login values
+            # instead of acting on them as if current. The flag auto-clears on
+            # the next successful fetch (_persist_activities sets stale=FALSE).
+            if civinfo_api.is_auth_broken():
+                stale_count = await mark_all_stale()
+                # Fetch the mcsrvstat aggregate count as context — CivMC hides
+                # its player sample (ROADMAP §8.5), so we can't tell WHICH
+                # citizens are online, only that the server is up with N
+                # players. Logging it confirms the server is alive even though
+                # per-citizen activity is unavailable.
+                player_count = await _fetch_mcsrvstat_player_count(session)
+                logger.warning(
+                    "CivInfo auth broken — marked %d activity_cache rows stale "
+                    "(last_login values not refreshed). CivMC server context: %s. "
+                    "Per-citizen activity unavailable until CivInfo recovers.",
+                    stale_count,
+                    (
+                        f"{player_count} players online"
+                        if player_count is not None
+                        else "server unreachable"
+                    ),
+                )
 
             # 2. Se è il primo del mese → genera report mensile
             if today.day == 1:  # solo il primo giorno del mese

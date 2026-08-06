@@ -90,6 +90,14 @@ async def init_db():
                         status TEXT,
                         is_online BOOLEAN DEFAULT FALSE,
                         last_checked TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                        -- Proposal 1 (CivInfo graceful degradation): TRUE when the
+                        -- row's last_login is stale because CivInfo auth is broken
+                        -- (the daily loop couldn't refresh it). Set en masse by
+                        -- tasks/activity_monitor.mark_all_stale(); cleared to FALSE
+                        -- on the next successful fetch (_persist_activities upsert +
+                        -- /citizen add). Readers (churn alerts, metrics) skip stale
+                        -- rows so they don't act on aging data.
+                        stale BOOLEAN DEFAULT FALSE,
                         FOREIGN KEY (ign) REFERENCES citizens(ign) ON DELETE CASCADE
                     )
                 """)
@@ -280,6 +288,15 @@ async def init_db():
                 # value for a given date. Idempotent — re-running is a no-op.
                 await conn.execute(
                     "ALTER TABLE monthly_snapshots ADD COLUMN IF NOT EXISTS notes TEXT"
+                )
+
+                # --- Proposal 1: activity_cache.stale ---
+                # Idempotent add for existing installs (fresh installs get it via
+                # the CREATE TABLE above). Marks rows whose last_login couldn't be
+                # refreshed because CivInfo auth was broken — readers skip stale
+                # rows so they don't act on aging activity data.
+                await conn.execute(
+                    "ALTER TABLE activity_cache ADD COLUMN IF NOT EXISTS stale BOOLEAN DEFAULT FALSE"
                 )
 
                 # join_date TEXT (DD/MM/YYYY) -> DATE

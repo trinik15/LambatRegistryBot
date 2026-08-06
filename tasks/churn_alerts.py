@@ -174,6 +174,13 @@ async def _fetch_candidates(threshold_days: int) -> list[dict]:
     Joins activity_cache → citizens → recruiters so every recruiter of an
     inactive citizen gets their own row (shared responsibility). Adds a
     ``days_inactive`` int for the nudge embed.
+
+    Proposal 1: skips rows flagged ``stale`` (CivInfo auth was broken when the
+    row was last checked, so ``last_login`` is aging and unreliable). Without
+    this guard, a CivInfo outage would cause false-positive nudges — a citizen
+    who logged in yesterday would be flagged inactive just because CivInfo
+    couldn't tell us. ``COALESCE(stale, FALSE)`` tolerates pre-migration rows
+    where the column is NULL.
     """
     rows = await db.execute_query(
         "SELECT ac.ign, ac.last_login, c.settlement, r.recruiter_discord_id, "
@@ -183,6 +190,7 @@ async def _fetch_candidates(threshold_days: int) -> list[dict]:
         "JOIN recruiters r ON ac.ign = r.ign "
         "WHERE ac.last_login IS NOT NULL "
         "AND ac.last_login < NOW() - ($1 * INTERVAL '1 day') "
+        "AND NOT COALESCE(ac.stale, FALSE) "
         "ORDER BY ac.last_login ASC",
         (threshold_days,),
         fetch_all=True,

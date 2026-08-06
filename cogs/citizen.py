@@ -326,7 +326,8 @@ class CitizenCog(commands.Cog):
                         "first_joined = EXCLUDED.first_joined, "
                         "status = EXCLUDED.status, "
                         "is_online = EXCLUDED.is_online, "
-                        "last_checked = CURRENT_TIMESTAMP",
+                        "last_checked = CURRENT_TIMESTAMP, "
+                        "stale = FALSE",
                         ign,
                         pa.last_login,
                         pa.last_logout,

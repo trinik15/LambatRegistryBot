@@ -486,6 +486,29 @@ calls. The bot switched to `mc-accounts/full` in Phase A (WS-1, commit
 `2600f92`). The old endpoint is kept as a fallback only if Gjum ever
 deprecates `mc-accounts/full` (no signal of this as of 2025-08).
 
+### 8.5 mcsrvstat.us exposes NO per-player data for CivMC
+
+**Confirmed 2025-11** by live-probing `api.mcsrvstat.us/3/play.civmc.net`
+during the CivInfo graceful-degradation work (Proposal 1).
+
+- CivMC's mcsrvstat response returns `players: {"online": N, "max": M}` with
+  **no `list` key at all** — the online-player sample is omitted from both the
+  Java server ping and the query protocol (`debug.query: false`). This is a
+  CivMC server-side configuration (common for large servers to shrink the ping
+  payload / for privacy), not a mcsrvstat limitation.
+- **Implication:** when CivInfo auth is broken (403), there is NO per-citizen
+  fallback for `is_online` / `last_login`. mcsrvstat can confirm the *server*
+  is alive (aggregate `players.online` count) but cannot tell us *which*
+  citizens are logged in.
+- The bot therefore degrades by **flagging `activity_cache` rows `stale=TRUE`**
+  (see `tasks/activity_monitor.mark_all_stale`) rather than attempting a
+  per-player refresh. Readers (the churn-alert task, the metrics gauge) skip
+  stale rows so they don't act on aging `last_login` values as if current.
+- **Don't try to "fix" this by parsing the mcsrvstat player list** — it's
+  empty/absent for CivMC by server config. Re-check only if CivMC enables the
+  query protocol or adds a player sample to its ping (watch
+  `debug.query`/`debug.ping` in the mcsrvstat response).
+
 ---
 
 *Roadmap authored from a full line-by-line read of commit `38e6e18` (81 commits,
