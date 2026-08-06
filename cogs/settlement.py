@@ -291,10 +291,10 @@ class SettlementCog(commands.Cog):
             activities = await _fetch_activities(igns, self.bot.http_session)
 
         active_count = sum(
-            1 for d in activities.values() if d[1] == "🟢"
-        )  # d = (status, emoji, last_login, status_text)
-        semi_count = sum(1 for d in activities.values() if d[1] == "🟠")
-        inactive_count = sum(1 for d in activities.values() if d[1] == "🔴")
+            1 for pa in activities.values() if pa.emoji == "🟢"
+        )
+        semi_count = sum(1 for pa in activities.values() if pa.emoji == "🟠")
+        inactive_count = sum(1 for pa in activities.values() if pa.emoji == "🔴")
         active_rate = round(active_count / total * 100, 1) if total else 0.0
 
         # 4. Growth since last snapshot.

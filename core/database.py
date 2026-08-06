@@ -84,9 +84,12 @@ async def init_db():
                 await conn.execute("""
                     CREATE TABLE IF NOT EXISTS activity_cache (
                         ign CITEXT PRIMARY KEY,
-                        last_login TIMESTAMP,
+                        last_login TIMESTAMPTZ,
+                        last_logout TIMESTAMPTZ,
+                        first_joined TIMESTAMPTZ,
                         status TEXT,
-                        last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        is_online BOOLEAN DEFAULT FALSE,
+                        last_checked TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (ign) REFERENCES citizens(ign) ON DELETE CASCADE
                     )
                 """)
@@ -106,6 +109,17 @@ async def init_db():
                 )
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_citizens_discord ON citizens(discord_id)"
+                )
+                # Phase A (WS-3): indexes on activity_cache for the two common
+                # query patterns — "who is active" (last_login DESC) and "who is
+                # online right now" (is_online = TRUE, partial index).
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_activity_cache_last_login "
+                    "ON activity_cache(last_login DESC)"
+                )
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_activity_cache_is_online "
+                    "ON activity_cache(is_online) WHERE is_online = TRUE"
                 )
 
                 # --- Phase 2.1: audit_log ---
@@ -209,6 +223,54 @@ async def init_db():
                     logger.info(
                         "Migrated citizens.ign and activity_cache.ign to CITEXT (case-insensitive)."
                     )
+
+                # --- Phase A (WS-3, fix B3): activity_cache TIMESTAMPTZ + new columns ---
+                # last_login + last_checked were plain TIMESTAMP (all other
+                # timestamp columns in the schema are TIMESTAMPTZ). The values
+                # were always UTC (civinfo_api converts epoch-ms with tz=UTC),
+                # so the migration just attaches the timezone marker — no data
+                # shift. Also adds last_logout / first_joined / is_online columns
+                # (new in Phase A) so the mc-accounts/full endpoint data can be
+                # fully persisted. All idempotent — re-running is a no-op.
+                ac_login_col = await conn.fetchrow(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_name = 'activity_cache' AND column_name = 'last_login'"
+                )
+                if ac_login_col and ac_login_col["data_type"] == "timestamp without time zone":
+                    await conn.execute(
+                        "ALTER TABLE activity_cache "
+                        "ALTER COLUMN last_login TYPE TIMESTAMPTZ "
+                        "USING last_login AT TIME ZONE 'UTC'"
+                    )
+                    await conn.execute(
+                        "ALTER TABLE activity_cache "
+                        "ALTER COLUMN last_checked TYPE TIMESTAMPTZ "
+                        "USING last_checked AT TIME ZONE 'UTC'"
+                    )
+                    logger.info(
+                        "Migrated activity_cache.last_login + last_checked to TIMESTAMPTZ."
+                    )
+
+                # Add the new columns if they don't exist (idempotent —
+                # ADD COLUMN IF NOT EXISTS is safe on Postgres 9.6+).
+                await conn.execute(
+                    "ALTER TABLE activity_cache ADD COLUMN IF NOT EXISTS last_logout TIMESTAMPTZ"
+                )
+                await conn.execute(
+                    "ALTER TABLE activity_cache ADD COLUMN IF NOT EXISTS first_joined TIMESTAMPTZ"
+                )
+                await conn.execute(
+                    "ALTER TABLE activity_cache ADD COLUMN IF NOT EXISTS is_online "
+                    "BOOLEAN DEFAULT FALSE"
+                )
+                # Back-fill is_online for any existing rows where last_login is
+                # present and last_logout is NULL or older (the mc-accounts/full
+                # endpoint exposes this, but existing rows predate the column).
+                await conn.execute(
+                    "UPDATE activity_cache SET is_online = TRUE "
+                    "WHERE last_login IS NOT NULL "
+                    "AND (last_logout IS NULL OR last_login > last_logout)"
+                )
 
                 # join_date TEXT (DD/MM/YYYY) -> DATE
                 col_jd = await conn.fetchrow(
