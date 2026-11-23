@@ -1,8 +1,8 @@
-"""Tests for /report activity + export — Phase 3.5/3.6 + Phase A (WS-3, fix B1).
+"""Tests for /report activity + export.
 
-Phase A update: ``_activity_label`` now accepts either a ``PlayerActivity`` or
+``_activity_label`` accepts either a ``PlayerActivity`` or
 a raw status string (for the DB-LEFT-JOIN path in report_export). The mapping
-was fixed — it used to expect 'active'/'semi'/'inactive' but the API client
+was fixed - it used to expect 'active'/'semi'/'inactive' but the API client
 returns 'ok'/'not_found'/'error', so live-fetch labels always fell through to
 "Unknown". Now the label is derived from the emoji (the bucket signal) when
 status is 'ok'.
@@ -22,7 +22,7 @@ def _pa(status="ok", emoji="🟢", **kw):
 
 
 class TestActivityLabelPlayerActivity:
-    """_activity_label maps a PlayerActivity to a CSV label (Phase A path)."""
+    """_activity_label maps a PlayerActivity to a CSV label."""
 
     def test_ok_active_emoji(self):
         """status=ok + emoji=🟢 → 'Active'."""
@@ -46,8 +46,7 @@ class TestActivityLabelPlayerActivity:
 class TestActivityLabelString:
     """_activity_label also accepts a raw status string (DB LEFT-JOIN path).
 
-    The activity_cache.status column stores 'ok'/'not_found'/'error' (new in
-    Phase A) plus legacy values 'active'/'semi'/'inactive'/'unknown' from
+    The activity_cache.status column stores 'ok'/'not_found'/'error' (new) plus legacy values 'active'/'semi'/'inactive'/'unknown' from
     older code paths. Both must map correctly.
     """
 
@@ -77,7 +76,7 @@ class TestActivityLabelString:
         """A label like 'Active' isn't a known raw code → returns 'Unknown'.
 
         Note: this is why report_export checks `if status in {known raw codes}`
-        before calling _activity_label — already-resolved labels are passed
+        before calling _activity_label - already-resolved labels are passed
         through directly. This test documents the edge case.
         """
         assert _activity_label("Active") == "Unknown"

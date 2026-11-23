@@ -1,9 +1,9 @@
-"""Tests for audit-log retention (ROADMAP §6.2).
+"""Tests for audit-log retention.
 
 Covers:
-  * ``services.audit.prune_older_than`` — the DELETE/parse-count path, using a
+  * ``services.audit.prune_older_than`` - the DELETE/parse-count path, using a
     fake asyncpg pool so no live Postgres is needed.
-  * ``tasks.audit_retention.AuditRetentionTask`` — the no-op-when-disabled gate,
+  * ``tasks.audit_retention.AuditRetentionTask`` - the no-op-when-disabled gate,
     the run-when-enabled path (monkeypatched to call a fake prune + capture the
     self-audit emit), and the start/stop lifecycle.
 
@@ -56,7 +56,7 @@ class _FakePool:
 
 
 # ---------------------------------------------------------------------------
-# prune_older_than — the SQL helper
+# prune_older_than - the SQL helper
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +66,7 @@ async def test_prune_older_than_returns_zero_when_disabled():
     with patch("core.database.get_pool", new=AsyncMock()) as mock_get_pool:
         result = await audit.prune_older_than(0)
     assert result == 0
-    # The pool must never have been acquired — the guard ran first.
+    # The pool must never have been acquired - the guard ran first.
     mock_get_pool.assert_not_awaited()
 
 
@@ -99,7 +99,7 @@ async def test_prune_older_than_parses_delete_count():
 
 @pytest.mark.asyncio
 async def test_prune_older_than_zero_rows_deleted():
-    """'DELETE 0' (nothing old enough to prune) parses to 0 — not an error."""
+    """'DELETE 0' (nothing old enough to prune) parses to 0 - not an error."""
     conn = _FakeConn(status="DELETE 0")
     fake_pool = _FakePool(conn)
     with patch("core.database.get_pool", new=AsyncMock(return_value=fake_pool)):
@@ -122,7 +122,7 @@ async def test_prune_older_than_unparseable_status_returns_zero():
 
 
 # ---------------------------------------------------------------------------
-# AuditRetentionTask — the nightly loop
+# AuditRetentionTask - the nightly loop
 # ---------------------------------------------------------------------------
 
 
@@ -199,7 +199,7 @@ async def test_task_swallows_prune_exception(monkeypatch):
     """A prune failure is logged but never crashes the loop (it'd kill the task).
 
     Matches the pattern in the other background tasks (uptime_monitor,
-    activity_monitor) — the top-level try/except keeps the loop alive so a
+    activity_monitor) - the top-level try/except keeps the loop alive so a
     transient DB blip doesn't permanently disable retention.
     """
     monkeypatch.setattr("core.config.Config.AUDIT_RETENTION_DAYS", 90)
@@ -215,12 +215,12 @@ async def test_task_swallows_prune_exception(monkeypatch):
         await task._run_prune()
 
     prune_mock.assert_awaited_once()
-    # emit must NOT have run — the prune failed before the emit step.
+    # emit must NOT have run - the prune failed before the emit step.
     emit_mock.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle — start/stop are idempotent and don't crash on a fresh task.
+# Lifecycle - start/stop are idempotent and don't crash on a fresh task.
 # ---------------------------------------------------------------------------
 
 
@@ -240,7 +240,7 @@ def test_start_and_stop_are_safe_without_event_loop():
 
 
 # ---------------------------------------------------------------------------
-# before_loop scheduling — target time is 03:30 UTC, rolls to tomorrow if past.
+# before_loop scheduling - target time is 03:30 UTC, rolls to tomorrow if past.
 # We don't run the real before_loop (it sleeps until 03:30); we just assert the
 # hour/minute constants are what the docstring promises, so a future edit can't
 # silently collide with the 02:00 daily_backup/daily_check jobs.
@@ -252,7 +252,7 @@ def test_prune_schedule_offset_from_other_nightly_jobs():
     from tasks.audit_retention import _PRUNE_HOUR, _PRUNE_MINUTE
 
     assert _PRUNE_HOUR != 2 or _PRUNE_MINUTE != 0, (
-        "Audit prune must not run at 02:00 UTC — it collides with daily_backup "
+        "Audit prune must not run at 02:00 UTC - it collides with daily_backup "
         "and daily_check. Pick a different offset (currently 03:30)."
     )
     assert 0 <= _PRUNE_HOUR <= 23

@@ -1,6 +1,6 @@
-"""Tests for scripts._env_loader — the .env parser used by preflight + seed.
+"""Tests for scripts._env_loader - the .env parser used by preflight + seed.
 
-Covers the bug Cursor AI hit on Windows: inline comments like
+Covers a real bug we hit on Windows: inline comments like
 ``COOLDOWN_FAST=5  # comment`` were not being stripped, so int() failed on
 the value ``"5  # comment"``.
 """
@@ -34,7 +34,7 @@ class TestStripInlineComment:
         assert _strip_inline_comment("5 # c") == "5"
 
     def test_no_space_before_hash_is_not_comment(self) -> None:
-        # ``foo#bar`` is NOT a comment — # must be preceded by whitespace.
+        # ``foo#bar`` is NOT a comment - # must be preceded by whitespace.
         assert _strip_inline_comment("foo#bar") == "foo#bar"
 
     def test_hash_at_start_is_comment(self) -> None:
@@ -65,7 +65,7 @@ class TestStripInlineComment:
         assert _strip_inline_comment("value   ") == "value"
 
     def test_url_with_query_string_no_comment(self) -> None:
-        # URL with query params — the ? and & are not comments.
+        # URL with query params - the ? and & are not comments.
         url = "https://api.example.com/v3?key=abc&format=json"
         assert _strip_inline_comment(url) == url
 
@@ -119,7 +119,7 @@ class TestLoadEnvFile:
         env.write_text("FOO=from_file\n")
         monkeypatch.setenv("FOO", "from_env")
         load_env_file(env)
-        # setdefault — existing env var wins.
+        # setdefault - existing env var wins.
         assert os.environ["FOO"] == "from_env"
 
     def test_handles_multiple_keys(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,7 +149,7 @@ class TestLoadEnvFile:
         assert os.environ["NOTES"] == "hello world  # not a comment"
 
     def test_real_env_example_subset(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Reproduce the exact pattern from .env.example that broke Cursor."""
+        """Reproduce the exact pattern from .env.example that broke the parser."""
         env = tmp_path / ".env"
         env.write_text(
             "COOLDOWN_FAST=5          # Quick view/list commands\n"

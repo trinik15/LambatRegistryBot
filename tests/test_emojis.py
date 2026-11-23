@@ -1,4 +1,4 @@
-"""Tests for core/emojis.py — key validation + cache behaviour (Phase 2.4).
+"""Tests for core/emojis.py - key validation + cache behaviour.
 
 The DB-touching functions (get, set_emoji, list_all) require a live pool and
 are covered by CI integration. Here we cover the pure validation logic (which
@@ -19,7 +19,7 @@ def _reset_cache():
     """Ensure each test starts and ends with a clean (None) cache.
 
     Without this, one test's populated cache would leak into the next, making
-    failures depend on execution order — the classic test-isolation trap.
+    failures depend on execution order - the classic test-isolation trap.
     """
     emoji_db._cache = None
     yield
@@ -27,7 +27,7 @@ def _reset_cache():
 
 
 # ---------------------------------------------------------------------------
-# set_emoji — key validation (runs before the DB upsert)
+# set_emoji - key validation (runs before the DB upsert)
 # ---------------------------------------------------------------------------
 
 

@@ -1,15 +1,15 @@
-"""Tests for CivInfo graceful degradation (Proposal 1) — the ``stale`` flag.
+"""Tests for CivInfo graceful degradation - the ``stale`` flag.
 
-Covers the honest-degradation path when CivInfo auth is broken: the daily loop
+Covers the degradation path when CivInfo auth is broken: the daily loop
 flags every ``activity_cache`` row ``stale=TRUE`` (without touching last_login),
 and readers (the churn-alert task) skip stale rows so a recruiter isn't nudged
 about a citizen who actually logged in recently but CivInfo couldn't tell us.
 
-Research context (ROADMAP §8.5): the original proposal planned a per-citizen
+Context: the original plan had a per-citizen
 ``is_online`` refresh from mcsrvstat's player list. Live probing proved CivMC
 hides its player sample (``players: {"online": N, "max": M}``, no ``list``),
-so that half was dropped. The staleness-marking half — which the proposal
-already described — is what shipped.
+so that half was dropped. The staleness-marking half - which the proposal
+already described - is what shipped.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -53,7 +53,7 @@ class _FakePool:
 
 
 # ---------------------------------------------------------------------------
-# mark_all_stale — the staleness valve
+# mark_all_stale - the staleness valve
 # ---------------------------------------------------------------------------
 
 
@@ -77,7 +77,7 @@ async def test_mark_all_stale_runs_update_and_parses_count():
 
 @pytest.mark.asyncio
 async def test_mark_all_stale_zero_rows():
-    """'UPDATE 0' (empty table) parses to 0 — not an error."""
+    """'UPDATE 0' (empty table) parses to 0 - not an error."""
     conn = _FakeConn(status="UPDATE 0")
     fake_pool = _FakePool(conn)
     with patch("core.database.get_pool", new=AsyncMock(return_value=fake_pool)):
@@ -95,7 +95,7 @@ async def test_mark_all_stale_unparseable_status_returns_zero():
 
 
 # ---------------------------------------------------------------------------
-# _fetch_mcsrvstat_player_count — the context-only aggregate fetch
+# _fetch_mcsrvstat_player_count - the context-only aggregate fetch
 # ---------------------------------------------------------------------------
 
 
@@ -145,7 +145,7 @@ async def test_mcsrvstat_player_count_non_200_returns_none():
 
 @pytest.mark.asyncio
 async def test_mcsrvstat_player_count_no_list_key_still_works():
-    """ROADMAP §8.5: CivMC omits players.list entirely — only aggregate count.
+    """CivMC can omit players.list entirely - only aggregate count.
 
     The helper reads players.online (an int), NOT players.list, so the absent
     list must not cause a failure. This is the exact response shape confirmed
@@ -157,7 +157,7 @@ async def test_mcsrvstat_player_count_no_list_key_still_works():
 
 
 # ---------------------------------------------------------------------------
-# churn _fetch_candidates — must skip stale rows (protects Proposal 2)
+# churn _fetch_candidates - must skip stale rows
 # ---------------------------------------------------------------------------
 
 
@@ -182,14 +182,14 @@ async def test_churn_fetch_candidates_skips_stale_rows(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _persist_activities — recovery clears stale (the upsert sets stale=FALSE)
+# _persist_activities - recovery clears stale (the upsert sets stale=FALSE)
 # ---------------------------------------------------------------------------
 
 
 def test_persist_activities_upsert_clears_stale():
     """The ON CONFLICT UPDATE must set stale=FALSE so a successful fetch after
     an outage clears the flag (recovery). We assert on the SQL string embedded
-    in the function source — the upsert is constructed inline, so a source
+    in the function source - the upsert is constructed inline, so a source
     inspection is the cheapest regression guard."""
     import inspect
 
@@ -200,7 +200,7 @@ def test_persist_activities_upsert_clears_stale():
 
 
 # ---------------------------------------------------------------------------
-# daily_check — auth-broken path calls mark_all_stale + logs context
+# daily_check - auth-broken path calls mark_all_stale + logs context
 # (Integration-style: we drive the ActivityMonitor.daily_check coroutine body
 # via its .coro to avoid the 24h loop, with CivInfo + DB + session mocked.)
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Tests for self-service applications — Phase 3.4.
+"""Tests for self-service applications.
 
 Tests the pure validation logic (IGN format, application status constants).
 The DB layer is mocked/async and tested via integration; these tests cover

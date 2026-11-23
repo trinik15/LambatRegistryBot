@@ -1,9 +1,9 @@
-"""Tests for services/audit.py — the pure helpers (Phase 2.1).
+"""Tests for services/audit.py - the pure helpers.
 
 The DB-touching functions (emit, search, post_to_channel) require a live
 asyncpg pool and are exercised by the integration in CI against a real
 Postgres. Here we cover the pure logic: the action vocabulary, the JSON
-serialiser fallback, the embed-summary renderer, and the colour/label map —
+serialiser fallback, the embed-summary renderer, and the colour/label map -
 the pieces most likely to silently regress.
 """
 
@@ -37,14 +37,14 @@ def test_all_actions_complete_and_stable():
 
 
 def test_snapshot_annotate_has_label_and_color():
-    """Phase 4.6: the new action renders in the audit embed."""
+    """The snapshot-annotate action renders in the audit embed."""
     assert audit._action_label(audit.SNAPSHOT_ANNOTATE) == "Snapshot annotated"
-    # Blurple (same as citizen.update — it's an update-class op).
+    # Blurple (same as citizen.update - it's an update-class op).
     assert audit._action_color(audit.SNAPSHOT_ANNOTATE) == 0x5865F2
 
 
 def test_audit_prune_has_label():
-    """ROADMAP §6.2: the retention-prune action renders in the audit embed.
+    """The retention-prune action renders in the audit embed.
 
     Color is left to the default grey-blue (it's a maintenance op, not a
     create/update/remove) so we only assert the label here.
@@ -54,7 +54,7 @@ def test_audit_prune_has_label():
 
 
 def test_churn_nudge_has_label_and_amber_color():
-    """ROADMAP Phase 5: the churn-nudge action renders with an attention color.
+    """The churn-nudge action renders with an attention color.
 
     Amber (0xF39C12) so a recruiter nudge stands out from the green creates /
     orange removes / blurple updates in the audit channel.
@@ -65,7 +65,7 @@ def test_churn_nudge_has_label_and_amber_color():
 
 
 # ---------------------------------------------------------------------------
-# _json_default — the fallback that lets json.dumps handle date/set values
+# _json_default - the fallback that lets json.dumps handle date/set values
 # in the details dict (which is common: join_date is a date, changes keys may
 # come from a set).
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ def test_emit_uses_json_default_for_dates():
 
 
 # ---------------------------------------------------------------------------
-# _action_label — the human-readable title for the audit embed
+# _action_label - the human-readable title for the audit embed
 # ---------------------------------------------------------------------------
 
 
@@ -126,7 +126,7 @@ def test_action_label_unknown_falls_back_to_action():
 
 
 # ---------------------------------------------------------------------------
-# _action_color — colour-codes the embed so council can scan the channel
+# _action_color - colour-codes the embed so council can scan the channel
 # ---------------------------------------------------------------------------
 
 
@@ -155,7 +155,7 @@ def test_action_color_unknown_is_default_grey():
 
 
 # ---------------------------------------------------------------------------
-# _summarise_details — renders the JSONB details as a compact embed field
+# _summarise_details - renders the JSONB details as a compact embed field
 # ---------------------------------------------------------------------------
 
 

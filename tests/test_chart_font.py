@@ -1,8 +1,8 @@
-"""Tests for services/charts font configuration (Phase 4.4).
+"""Tests for services/charts font configuration.
 
-Phase 4.4 pins ``font.family`` to ``DejaVu Sans`` so Filipino names ("Mabuhay",
+charts.py pins ``font.family`` to ``DejaVu Sans`` so Filipino names ("Mabuhay",
 "Kahiran ng Lambat") + accented European settlement names ("Tierra del Cabo",
-"Bazariskes", "Florraine") render correctly on every host — not just hosts
+"Bazariskes", "Florraine") render correctly on every host - not just hosts
 whose default matplotlib font happens to cover those glyphs.
 
 These tests verify:
@@ -42,7 +42,7 @@ def test_chart_font_family_is_dejavu_sans():
 def test_chart_font_has_lambat_glyphs():
     """DejaVu Sans must contain every glyph used by Lambat names.
 
-    This is the core guarantee of Phase 4.4: no host-dependent tofu boxes for
+    The core guarantee: no host-dependent tofu boxes for
     ñ / ü / accented vowels. If this fails, either matplotlib's bundled
     DejaVu Sans was removed (very unlikely) or someone changed the font to
     one that doesn't cover Latin Extended-A.
@@ -80,7 +80,7 @@ def test_render_activity_series_with_lambat_glyphs_produces_png():
     charts._apply_dark_style()
     dates = [datetime(2025, 1, 1), datetime(2025, 2, 1), datetime(2025, 3, 1)]
     totals = [10, 12, 15]
-    title = "Florraine — Mabuhay & Tierra del Cabo (ñüáé)"
+    title = "Florraine - Mabuhay & Tierra del Cabo (ñüáé)"
 
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")

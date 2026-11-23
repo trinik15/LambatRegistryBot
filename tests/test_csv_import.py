@@ -1,4 +1,4 @@
-"""Tests for CSV bulk import — Phase 3.1 parser."""
+"""Tests for CSV bulk import - the parser."""
 
 from services.csv_import import parse_csv
 

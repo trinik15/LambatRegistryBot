@@ -1,7 +1,7 @@
-"""Tests for api/civinfo_api.py — the CivInfo TTL cache + auth-broken logic.
+"""Tests for api/civinfo_api.py - the CivInfo TTL cache + auth-broken logic.
 
-Phase A refactor: the return type changed from a 4-tuple to a frozen
-``PlayerActivity`` dataclass. These tests cover the honest-degradation branches
+Refactor: the return type changed from a 4-tuple to a frozen
+``PlayerActivity`` dataclass. These tests cover the auth-broken branches
 (auth-broken TTL logic, per-status cache TTLs) AND the new mc-accounts/full
 response parsing (timestamp conversion, bucketing, is_online derivation).
 """
@@ -32,7 +32,7 @@ def reset_civinfo_state():
 
 
 # ---------------------------------------------------------------------------
-# _ttl_for — the per-status cache TTL that stops transient outages poisoning
+# _ttl_for - the per-status cache TTL that stops transient outages poisoning
 # the cache for the full 5-minute success window.
 # ---------------------------------------------------------------------------
 
@@ -62,7 +62,7 @@ def test_ttl_for_unknown_status_falls_back_to_error_ttl():
 
 
 # ---------------------------------------------------------------------------
-# CivInfoCache — set/get/invalidate/clear (now with PlayerActivity)
+# CivInfoCache - set/get/invalidate/clear (now with PlayerActivity)
 # ---------------------------------------------------------------------------
 
 
@@ -125,12 +125,12 @@ def test_cache_get_evicts_expired_entry():
 
 
 # ---------------------------------------------------------------------------
-# PlayerActivity — the dataclass that replaced the 4-tuple
+# PlayerActivity - the dataclass that replaced the 4-tuple
 # ---------------------------------------------------------------------------
 
 
 def test_player_activity_is_frozen():
-    """PlayerActivity is immutable — can't mutate fields after creation."""
+    """PlayerActivity is immutable - can't mutate fields after creation."""
     from api.civinfo_api import PlayerActivity
 
     pa = PlayerActivity(status="ok", emoji="🟢", last_login=None, status_text="x")
@@ -185,7 +185,7 @@ def test_player_activity_is_online_false_when_login_none():
 
 
 # ---------------------------------------------------------------------------
-# _parse_ts — epoch-ms → UTC datetime conversion
+# _parse_ts - epoch-ms → UTC datetime conversion
 # ---------------------------------------------------------------------------
 
 
@@ -218,7 +218,7 @@ def test_parse_ts_garbage_returns_none():
 
 
 # ---------------------------------------------------------------------------
-# _bucket_activity — the 30d/60d Active/Semi/Inactive bucketing
+# _bucket_activity - the 30d/60d Active/Semi/Inactive bucketing
 # ---------------------------------------------------------------------------
 
 
@@ -265,7 +265,7 @@ def test_bucket_inactive():
 
 
 # ---------------------------------------------------------------------------
-# Auth-broken state — the honest-degradation flag.
+# Auth-broken state - the stale/auth flag.
 # ---------------------------------------------------------------------------
 
 
@@ -325,7 +325,7 @@ def test_clear_auth_broken_resets_warned_flag():
 
 
 # ---------------------------------------------------------------------------
-# get_player_activity — the HTTP path (mocked)
+# get_player_activity - the HTTP path (mocked)
 # ---------------------------------------------------------------------------
 
 

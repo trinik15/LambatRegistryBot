@@ -1,4 +1,4 @@
-"""Tests for /factory commands + factorymod_api helpers — Phase B (WS-6)."""
+"""Tests for /factory commands + factorymod_api helpers."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -7,7 +7,7 @@ import pytest
 from api import factorymod_api
 
 # ---------------------------------------------------------------------------
-# format_item — Bukkit ItemStack dict → human-readable string
+# format_item - Bukkit ItemStack dict → human-readable string
 # ---------------------------------------------------------------------------
 
 
@@ -49,7 +49,7 @@ class TestFormatItem:
 
 
 # ---------------------------------------------------------------------------
-# find_factory — case-insensitive factory lookup
+# find_factory - case-insensitive factory lookup
 # ---------------------------------------------------------------------------
 
 
@@ -107,7 +107,7 @@ class TestFindFactory:
 
 
 # ---------------------------------------------------------------------------
-# find_recipe — recipe lookup by ID or name
+# find_recipe - recipe lookup by ID or name
 # ---------------------------------------------------------------------------
 
 
@@ -145,7 +145,7 @@ class TestFindRecipe:
 
 
 # ---------------------------------------------------------------------------
-# get_factory_recipes — resolve recipe IDs to recipe dicts
+# get_factory_recipes - resolve recipe IDs to recipe dicts
 # ---------------------------------------------------------------------------
 
 
@@ -183,7 +183,7 @@ class TestGetFactoryRecipes:
 
 
 # ---------------------------------------------------------------------------
-# get_factorymod_config — async fetch + cache (mocked HTTP)
+# get_factorymod_config - async fetch + cache (mocked HTTP)
 # ---------------------------------------------------------------------------
 
 
@@ -240,7 +240,7 @@ recipes:
         assert session.get.call_count == 1
         # Second call should be cached.
         await factorymod_api.get_factorymod_config(session)
-        assert session.get.call_count == 1  # still 1 — served from cache
+        assert session.get.call_count == 1  # still 1 - served from cache
 
     @pytest.mark.asyncio
     async def test_http_error_returns_none(self):
