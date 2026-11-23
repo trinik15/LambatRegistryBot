@@ -1,8 +1,8 @@
-"""Tests for services/recruiters.py — the ID cleaning logic (Phase 2.2).
+"""Tests for services/recruiters.py - the ID cleaning logic.
 
 The DB-touching functions (set_recruiters, get_recruiters, leaderboard)
 require a live asyncpg pool and are covered by CI integration. Here we cover
-``_clean_recruiter_ids`` — the pure helper that dedupes and validates Discord
+``_clean_recruiter_ids`` - the pure helper that dedupes and validates Discord
 user ID strings before they hit the junction table. A bug here would corrupt
 the recruiters table, so it's the highest-value thing to unit-test.
 """

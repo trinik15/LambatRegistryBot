@@ -1,4 +1,4 @@
-"""Tests for /server online — Phase 3.8 online-now cross-reference."""
+"""Tests for /server online - the online-now cross-reference."""
 
 from cogs.server import _build_online_embed, _partition_citizens
 

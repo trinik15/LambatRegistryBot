@@ -1,4 +1,4 @@
-"""Tests for /server trends + render_server_trends — Phase B (WS-5)."""
+"""Tests for /server trends + render_server_trends."""
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -208,7 +208,7 @@ class TestGetServerStatusHistory:
             first = await civinfo_api.get_server_status_history("day", session)
             assert session.get.call_count == 1
             second = await civinfo_api.get_server_status_history("day", session)
-            # Still 1 — the second call was served from cache.
+            # Still 1 - the second call was served from cache.
             assert session.get.call_count == 1
             assert first == second
 

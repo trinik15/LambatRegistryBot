@@ -1,4 +1,4 @@
-"""Tests for tasks/uptime_monitor.py — the edge-triggered outage state machine.
+"""Tests for tasks/uptime_monitor.py - the edge-triggered outage state machine.
 
 CivMC relevance: the monitor must NOT alert on a single transient mcsrvstat
 hiccup, but MUST alert once an outage is confirmed (2 consecutive failures),
@@ -106,7 +106,7 @@ async def test_online_poll_when_already_online_no_alert(monkeypatch):
 
 
 async def test_single_offline_poll_does_not_alert(monkeypatch):
-    """One offline poll is NOT enough — avoids false alarms from a mcsrvstat hiccup."""
+    """One offline poll is NOT enough - avoids false alarms from a mcsrvstat hiccup."""
     monitor, sent = _make_monitor(monkeypatch)
     await _poll_with(monitor, False)
     assert sent == []
@@ -166,7 +166,7 @@ async def test_recovery_after_outage_posts_duration(monkeypatch):
 
 
 async def test_recovery_records_last_outage_duration(monkeypatch):
-    """Phase 1.5: the monitor stores the last outage duration for /metrics."""
+    """The monitor stores the last outage duration for /metrics."""
     monitor, _ = _make_monitor(monkeypatch)
     await _poll_with(monitor, False)
     await _poll_with(monitor, False)

@@ -1,4 +1,4 @@
-"""Tests for /settlement info — Phase 3.3 dashboard growth computation."""
+"""Tests for /settlement info - dashboard growth computation."""
 
 from cogs.settlement import _compute_growth_text
 

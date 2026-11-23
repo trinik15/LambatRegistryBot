@@ -1,6 +1,6 @@
-"""Tests for utils.py — date validation/parsing/formatting helpers.
+"""Tests for utils.py - date validation/parsing/formatting helpers.
 
-These cover the Phase 0 join-date sanity rules (no future dates, no pre-CivMC
+These cover the join-date sanity rules (no future dates, no pre-CivMC
 dates) plus the multi-format parse/format helpers that asyncpg DATE objects,
 strings, and datetimes all flow through.
 """
@@ -15,7 +15,7 @@ from utils import (
 )
 
 # ---------------------------------------------------------------------------
-# is_valid_date — the Phase 0 join-date sanity gate.
+# is_valid_date - the join-date sanity gate.
 # ---------------------------------------------------------------------------
 
 

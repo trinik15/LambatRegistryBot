@@ -1,4 +1,4 @@
-"""Tests for tasks/role_sync.py — discrepancy detection (Phase 2.5).
+"""Tests for tasks/role_sync.py - discrepancy detection.
 
 ``detect_role_issues`` is a pure function (no I/O) that takes a Discord member
 and a settlement name and returns a list of human-readable discrepancies. We
@@ -11,7 +11,7 @@ from tasks.role_sync import detect_role_issues
 
 
 class FakeRole:
-    """A minimal stand-in for discord.Role — just an id and name."""
+    """A minimal stand-in for discord.Role - just an id and name."""
 
     def __init__(self, role_id: int, name: str = ""):
         self.id = role_id

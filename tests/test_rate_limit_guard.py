@@ -1,4 +1,4 @@
-"""Tests for services/role_manager.rate_limit_guard (Phase 4.3).
+"""Tests for services/role_manager.rate_limit_guard.
 
 The guard backs off when ``bot.is_ws_ratelimited()`` returns True, so the
 weekly role_sync loop (and future bulk callers) don't trip Discord 429s.
@@ -39,13 +39,13 @@ class _FakeBotClearsAfter:
 
 
 class _FakeBotNoMethod:
-    """Bot stub without is_ws_ratelimited (defensive — should not crash)."""
+    """Bot stub without is_ws_ratelimited (defensive - should not crash)."""
 
     pass
 
 
 # ---------------------------------------------------------------------------
-# Happy path — gateway clear, guard yields immediately.
+# Happy path - gateway clear, guard yields immediately.
 # ---------------------------------------------------------------------------
 
 
@@ -59,7 +59,7 @@ async def test_guard_yields_immediately_when_not_rate_limited():
 
 
 # ---------------------------------------------------------------------------
-# Back-off path — gateway rate-limited, then clears.
+# Back-off path - gateway rate-limited, then clears.
 # ---------------------------------------------------------------------------
 
 
@@ -73,7 +73,7 @@ async def test_guard_waits_then_yields_when_rate_limit_clears():
 
 
 # ---------------------------------------------------------------------------
-# Max-wait path — gateway stays rate-limited forever; guard proceeds anyway
+# Max-wait path - gateway stays rate-limited forever; guard proceeds anyway
 # after max_wait so the role op isn't stalled indefinitely.
 # ---------------------------------------------------------------------------
 
@@ -88,7 +88,7 @@ async def test_guard_proceeds_after_max_wait():
 
 
 # ---------------------------------------------------------------------------
-# Defensive path — bot without is_ws_ratelimited (e.g. a test mock) doesn't
+# Defensive path - bot without is_ws_ratelimited (e.g. a test mock) doesn't
 # crash; the guard yields immediately.
 # ---------------------------------------------------------------------------
 
@@ -102,7 +102,7 @@ async def test_guard_tolerates_bot_without_is_ws_ratelimited():
 
 
 # ---------------------------------------------------------------------------
-# Concurrency — the guard doesn't hold any lock, so two guards can run
+# Concurrency - the guard doesn't hold any lock, so two guards can run
 # concurrently (relevant for the role_sync loop which is sequential but
 # could be parallelised in future).
 # ---------------------------------------------------------------------------

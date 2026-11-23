@@ -1,8 +1,8 @@
-"""Tests for cogs/snapshot.py — the pure embed-builder helpers (Phase 4.6).
+"""Tests for cogs/snapshot.py - the pure embed-builder helpers.
 
 The DB-touching command handlers require a live asyncpg pool (covered by the
 integration CI). Here we cover the pure helpers that render the success
-embeds — the pieces most likely to silently regress when a Discord embed
+embeds - the pieces most likely to silently regress when a Discord embed
 field limit changes or the note-truncation logic shifts.
 """
 
@@ -20,34 +20,34 @@ from cogs.snapshot import (
 )
 
 # ---------------------------------------------------------------------------
-# _format_list_line — the per-row renderer for /snapshot list.
+# _format_list_line - the per-row renderer for /snapshot list.
 # ---------------------------------------------------------------------------
 
 
 class TestFormatListLine:
     def test_short_note(self):
         line = _format_list_line("01/02/2026", "Post-exodus census")
-        assert line == "• **01/02/2026** — Post-exodus census"
+        assert line == "• **01/02/2026** - Post-exodus census"
 
     def test_strips_whitespace(self):
         line = _format_list_line("01/02/2026", "  spaced note  ")
-        assert line == "• **01/02/2026** — spaced note"
+        assert line == "• **01/02/2026** - spaced note"
 
     def test_empty_note(self):
         # An empty note renders an empty tail after the dash.
         line = _format_list_line("01/02/2026", "")
-        assert line == "• **01/02/2026** — "
+        assert line == "• **01/02/2026** - "
 
     def test_none_note(self):
         # Defensive: DB rows might have NULL (filtered by the SQL, but be safe).
         line = _format_list_line("01/02/2026", None)  # type: ignore[arg-type]
-        assert line == "• **01/02/2026** — "
+        assert line == "• **01/02/2026** - "
 
     def test_long_note_truncated_with_ellipsis(self):
         long_note = "x" * (LIST_NOTE_TRUNCATE + 50)
         line = _format_list_line("01/02/2026", long_note)
         # Truncated to LIST_NOTE_TRUNCATE chars (117 + "...").
-        assert len(line.split("— ", 1)[1]) == LIST_NOTE_TRUNCATE
+        assert len(line.split("- ", 1)[1]) == LIST_NOTE_TRUNCATE
         assert line.endswith("...")
 
     def test_exact_truncate_length_not_truncated(self):
@@ -55,11 +55,11 @@ class TestFormatListLine:
         note_at_limit = "x" * LIST_NOTE_TRUNCATE
         line = _format_list_line("01/02/2026", note_at_limit)
         assert not line.endswith("...")
-        assert f"— {note_at_limit}" in line
+        assert f"- {note_at_limit}" in line
 
 
 # ---------------------------------------------------------------------------
-# _build_annotate_embed — the success embed for /snapshot annotate.
+# _build_annotate_embed - the success embed for /snapshot annotate.
 # ---------------------------------------------------------------------------
 
 
@@ -89,7 +89,7 @@ class TestBuildAnnotateEmbed:
 
 
 # ---------------------------------------------------------------------------
-# _build_list_embed — the /snapshot list embed from DB rows.
+# _build_list_embed - the /snapshot list embed from DB rows.
 # ---------------------------------------------------------------------------
 
 
@@ -121,7 +121,7 @@ class TestBuildListEmbed:
         assert "Older" in field.value
 
     def test_row_with_none_notes_renders_empty(self):
-        # Defensive — the SQL filters NULL notes, but the helper shouldn't crash.
+        # Defensive - the SQL filters NULL notes, but the helper shouldn't crash.
         rows = [{"snapshot_date": date(2026, 2, 1), "notes": None}]
         embed = _build_list_embed(rows)
         field = embed.fields[0]
@@ -136,7 +136,7 @@ class TestBuildListEmbed:
 
 
 # ---------------------------------------------------------------------------
-# _build_clear_embed — the success embed for /snapshot clear.
+# _build_clear_embed - the success embed for /snapshot clear.
 # ---------------------------------------------------------------------------
 
 

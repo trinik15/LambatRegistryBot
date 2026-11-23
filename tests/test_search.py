@@ -1,4 +1,4 @@
-"""Tests for /citizen search — Phase 3.2 search results embed builder."""
+"""Tests for /citizen search - the results embed builder."""
 
 from datetime import date
 

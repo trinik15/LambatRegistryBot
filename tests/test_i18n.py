@@ -1,4 +1,4 @@
-"""Tests for core/i18n.tr (Phase 4.5).
+"""Tests for core/i18n.tr.
 
 Covers the lazy-load, fallback chain, interpolation, and the test-only reload
 helper. Locale files live in ``locales/{en,fil}.json`` at the repo root.
@@ -25,7 +25,7 @@ def _reload_locales_each_test():
 
 
 # ---------------------------------------------------------------------------
-# available_langs — both en + fil ship with the bot.
+# available_langs - both en + fil ship with the bot.
 # ---------------------------------------------------------------------------
 
 
@@ -43,7 +43,7 @@ def test_available_langs_puts_en_first():
 
 
 # ---------------------------------------------------------------------------
-# tr — basic lookup + interpolation.
+# tr - basic lookup + interpolation.
 # ---------------------------------------------------------------------------
 
 
@@ -63,7 +63,7 @@ def test_tr_handles_emoji_placeholder():
 
 
 # ---------------------------------------------------------------------------
-# Fallback chain — missing key in requested lang falls back to en.
+# Fallback chain - missing key in requested lang falls back to en.
 # ---------------------------------------------------------------------------
 
 
@@ -87,7 +87,7 @@ def test_tr_returns_key_for_unknown_lang():
 
 
 # ---------------------------------------------------------------------------
-# Filipino translation — the stretch-goal locale.
+# Filipino translation - the stretch-goal locale.
 # ---------------------------------------------------------------------------
 
 
@@ -97,7 +97,7 @@ def test_tr_returns_filipino_value_when_lang_is_fil():
 
 
 # ---------------------------------------------------------------------------
-# Config.LOCALE — the default lang is read from Config.
+# Config.LOCALE - the default lang is read from Config.
 # ---------------------------------------------------------------------------
 
 
@@ -109,7 +109,7 @@ def test_tr_uses_config_locale_when_no_lang_passed(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Format-error resilience — a template with a missing field shouldn't raise.
+# Format-error resilience - a template with a missing field shouldn't raise.
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +127,7 @@ def test_tr_returns_template_on_format_error(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# No-kwargs fast path — tr(key) without kwargs returns the raw template.
+# No-kwargs fast path - tr(key) without kwargs returns the raw template.
 # ---------------------------------------------------------------------------
 
 
@@ -139,7 +139,7 @@ def test_tr_no_kwargs_returns_raw_template():
 
 
 # ---------------------------------------------------------------------------
-# Locale file validity — both JSON files parse + are flat str→str mappings.
+# Locale file validity - both JSON files parse + are flat str→str mappings.
 # ---------------------------------------------------------------------------
 
 
