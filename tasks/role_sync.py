@@ -1,4 +1,4 @@
-"""Weekly role reconciliation task (Phase 2.5).
+"""Weekly role reconciliation task.
 
 Checks every citizen's Discord member still holds the citizen/settler/
 settlement roles and lacks the guest role. Discrepancies are recorded in the
@@ -148,7 +148,7 @@ class RoleSyncTask:
 
                 if Config.ROLE_SYNC_AUTO:
                     try:
-                        # Phase 4.3: back off when the Discord gateway is
+                        # Back off when the Discord gateway is
                         # globally rate-limited. The weekly loop can fire
                         # many add_roles calls in succession (one per
                         # discrepancy), which can trip a 429 mid-batch and
@@ -168,7 +168,7 @@ class RoleSyncTask:
                             f"RoleSyncTask: auto-fix failed for {c['ign']}: {e}",
                             exc_info=True,
                         )
-            except Exception as e:  # noqa: BLE001 — one bad row must not abort the pass
+            except Exception as e:  # noqa: BLE001 - one bad row must not abort the pass
                 logger.error(f"RoleSyncTask: error checking citizen {c['ign']}: {e}")
 
         logger.info(

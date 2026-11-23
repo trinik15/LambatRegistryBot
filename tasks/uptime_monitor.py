@@ -1,4 +1,4 @@
-"""Uptime monitor — edge-triggered CivMC outage / recovery alerts.
+"""Uptime monitor - edge-triggered CivMC outage / recovery alerts.
 
 CivMC relevance: citizens get stranded not knowing if the server is down or
 if it's just them. This task polls mcsrvstat.us every few minutes and posts
@@ -42,16 +42,16 @@ class UptimeMonitor:
         self.fail_count = 0
         self.outage_start = None
         self.alerted_outage = False
-        # Phase 1.5: the duration of the most recent completed outage, in
+        # Duration of the most recent completed outage, in
         # seconds. Populated on recovery, read by /metrics. 0 until the first
         # recovery so the gauge has a sensible default.
         self.last_outage_duration_seconds = 0.0
-        logger.info("🖥️ UptimeMonitor initialized")
+        logger.info("UptimeMonitor initialized")
 
     async def _fetch_online(self) -> bool | None:
         """Return True if server is online, False if offline, None on error.
 
-        ``None`` means "we couldn't tell" (mcsrvstat itself failed) — this is
+        ``None`` means "we couldn't tell" (mcsrvstat itself failed) - this is
         NOT counted as an outage, only as a skipped poll.
         """
         url = f"{Config.MCSRVSTAT_API_BASE}/{Config.SERVER_ADDRESS}"
@@ -70,7 +70,7 @@ class UptimeMonitor:
         """Post an alert to the configured channel (if any)."""
         if not Config.ALERT_CHANNEL_ID:
             logger.warning(
-                "Uptime alert skipped — ALERT_CHANNEL_ID is not set. "
+                "Uptime alert skipped - ALERT_CHANNEL_ID is not set. "
                 f"Would have posted: {embed.title}"
             )
             return
@@ -88,7 +88,7 @@ class UptimeMonitor:
         result = await self._fetch_online()
 
         if result is None:
-            # mcsrvstat itself was unreachable — don't change state, just skip.
+            # mcsrvstat itself was unreachable - don't change state, just skip.
             logger.debug("Uptime poll inconclusive (API unreachable), skipping.")
             return
 
@@ -131,7 +131,7 @@ class UptimeMonitor:
             self.fail_count += 1
             if self.fail_count < OUTAGE_THRESHOLD:
                 logger.debug(
-                    f"CivMC offline poll ({self.fail_count}/{OUTAGE_THRESHOLD}) — waiting for confirmation."
+                    f"CivMC offline poll ({self.fail_count}/{OUTAGE_THRESHOLD}) - waiting for confirmation."
                 )
                 return
 
@@ -157,9 +157,9 @@ class UptimeMonitor:
                 )
                 embed.set_footer(text="Automatic recovery alert will follow")
                 await self._send_alert(embed, content="@here ⚠️ **CivMC appears to be down**")
-                logger.warning("CivMC outage detected — alert sent.")
+                logger.warning("CivMC outage detected - alert sent.")
             else:
-                # Already alerted — just log quietly.
+                # Already alerted - just log quietly.
                 logger.debug("CivMC still offline (already alerted).")
 
     @tasks.loop(seconds=Config.UPTIME_CHECK_INTERVAL)

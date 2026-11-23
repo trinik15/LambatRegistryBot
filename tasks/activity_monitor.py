@@ -24,7 +24,7 @@ CIVINFO_CONCURRENCY = 5
 async def _fetch_activities(igns, session):
     """Fetch CivInfo activity for many IGNs concurrently.
 
-    Returns ``{ign: PlayerActivity}`` — a dict mapping each IGN to its
+    Returns ``{ign: PlayerActivity}`` - a dict mapping each IGN to its
     :class:`api.civinfo_api.PlayerActivity`. Bounded by a semaphore so we
     don't fire hundreds of requests at once.
     """
@@ -45,7 +45,7 @@ async def _persist_activities(activities: dict) -> int:
     and /report export's LEFT JOIN reflect the latest CivInfo data (not just
     rows written by /citizen add).
 
-    Only rows with ``status == "ok"`` (a real last_login) are persisted —
+    Only rows with ``status == "ok"`` (a real last_login) are persisted -
     ``not_found`` / ``error`` results are skipped to avoid overwriting a known-
     good row with a transient failure. Returns the number of rows upserted.
     """
@@ -89,8 +89,7 @@ async def mark_all_stale() -> int:
     ``last_login`` (the cached value stays as the last known good, just flagged
     as aging). Returns the number of rows marked.
 
-    Proposal 1 (CivInfo graceful degradation): this is the honest-degradation
-    valve. Without it, ``last_login`` silently ages during a CivInfo outage and
+    This is the graceful-degradation valve. Without it, ``last_login`` silently ages during a CivInfo outage and
     readers (the churn-alert task, the /metrics active-citizens gauge) act on
     stale data as if it were current. The ``stale`` flag lets those readers
     skip stale rows so a recruiter isn't nudged about a citizen who actually
@@ -110,8 +109,8 @@ async def _fetch_mcsrvstat_player_count(session) -> int | None:
     """Fetch the CivMC aggregate online-player count from mcsrvstat.us.
 
     Used only for the staleness warning log (context: "server up, N online")
-    when CivInfo is auth-broken — we can't get per-citizen data (ROADMAP §8.5:
-    CivMC hides its player sample), but the aggregate count confirms the server
+    when CivInfo is auth-broken - we can't get per-citizen data (CivMC
+    hides its player sample), but the aggregate count confirms the server
     is alive. Returns None on any failure (the warning logs "server
     unreachable"). No auth needed; ~40ms.
     """
@@ -125,15 +124,15 @@ async def _fetch_mcsrvstat_player_count(session) -> int | None:
                 return 0
             players = data.get("players") or {}
             return int(players.get("online", 0))
-    except Exception as e:  # noqa: BLE001 — context-only; never break daily_check
+    except Exception as e:  # noqa: BLE001 - context-only; never break daily_check
         logger.debug(f"mcsrvstat player-count fetch failed (context only): {e}")
         return None
 
 
 # NOTE: SETTLEMENT_TO_DUCHY was a hardcoded dict mapping each settlement to
-# its duchy. As of Phase 2.3 this mapping lives in the ``settlements.duchy``
+# its duchy. This mapping now lives in the ``settlements.duchy``
 # DB column (seeded from core.constants.SETTLEMENT_TO_DUCHY during migration).
-# The monthly report now JOINs settlements to read duchy directly — no more
+# The monthly report now JOINs settlements to read duchy directly - no more
 # hardcoded mapping in this file.
 
 
@@ -158,35 +157,34 @@ class ActivityMonitor:
                 return
 
             # 1. Aggiorna la cache di attività per tutti i cittadini
-            #    (concurrent + bounded by a semaphore — was sequential with a
+            #    (concurrent + bounded by a semaphore - was sequential with a
             #     0.5s sleep per citizen, which took minutes on big registries).
             session = self.bot.http_session
             activities = await _fetch_activities([row["ign"] for row in citizens], session)
 
-            # Phase A (WS-3, fix B2): persist the refreshed activity to the
+            # Persist the refreshed activity to the
             # activity_cache DB table. Previously the daily loop only updated
             # the in-memory cache, so /metrics ACTIVE_CITIZENS and /report
-            # export's LEFT JOIN only reflected rows written by /citizen add —
+            # export's LEFT JOIN only reflected rows written by /citizen add -
             # not the daily refresh. Now every successful fetch is upserted,
             # so the gauge and export are always current.
             await _persist_activities(activities)
 
-            # Proposal 1 (CivInfo graceful degradation): if CivInfo auth is
-            # broken, the batch above persisted nothing (every pa.status was
+            # If CivInfo auth is broken, the batch above persisted nothing (every pa.status was
             # "error"/"auth-broken"). Flag every activity_cache row as stale so
             # readers (churn alerts, /metrics) skip aging last_login values
             # instead of acting on them as if current. The flag auto-clears on
             # the next successful fetch (_persist_activities sets stale=FALSE).
             if civinfo_api.is_auth_broken():
                 stale_count = await mark_all_stale()
-                # Fetch the mcsrvstat aggregate count as context — CivMC hides
-                # its player sample (ROADMAP §8.5), so we can't tell WHICH
+                # Fetch the mcsrvstat aggregate count as context - CivMC hides
+                # its player sample, so we can't tell WHICH
                 # citizens are online, only that the server is up with N
                 # players. Logging it confirms the server is alive even though
                 # per-citizen activity is unavailable.
                 player_count = await _fetch_mcsrvstat_player_count(session)
                 logger.warning(
-                    "CivInfo auth broken — marked %d activity_cache rows stale "
+                    "CivInfo auth broken - marked %d activity_cache rows stale "
                     "(last_login values not refreshed). CivMC server context: %s. "
                     "Per-citizen activity unavailable until CivInfo recovers.",
                     stale_count,
@@ -199,7 +197,7 @@ class ActivityMonitor:
 
             # 2. Se è il primo del mese → genera report mensile
             if today.day == 1:  # solo il primo giorno del mese
-                logger.info("🔵 Generating monthly report")
+                logger.info("Generating monthly report")
                 await self.generate_monthly_report()
 
             logger.info("Daily activity check completed")
@@ -234,7 +232,7 @@ class ActivityMonitor:
         last_month_date = last_month.date()
         month_name = last_month.strftime("%B %Y")  # Nome del mese passato (es. "February 2026")
 
-        # Phase 2.3: JOIN settlements to read duchy from the DB instead of the
+        # JOIN settlements to read duchy from the DB instead of the
         # hardcoded SETTLEMENT_TO_DUCHY dict.
         citizens = await db.execute_query(
             "SELECT c.ign, c.settlement, c.join_date, s.duchy "
@@ -268,7 +266,7 @@ class ActivityMonitor:
         for c in citizens:
             pa = activities.get(c["ign"])
             # Default to an error sentinel if the IGN wasn't fetched (shouldn't
-            # happen — _fetch_activities covers every IGN — but be defensive).
+            # happen - _fetch_activities covers every IGN - but be defensive).
             is_active = (pa.emoji == "🟢") if pa else False
 
             district = c["settlement"]
@@ -305,7 +303,7 @@ class ActivityMonitor:
 
         # Costruzione messaggio
         lines = []
-        # Phase 4.5: monthly report headers are looked up via tr() so a
+        # Monthly report headers are looked up via tr() so a
         # Filipino-themed deployment (LOCALE=fil) can translate them. The
         # numbers stay locale-independent.
         lines.append(tr("monthly.title", month_name=month_name) + "\n")
@@ -457,9 +455,9 @@ class ActivityMonitor:
             except discord.HTTPException as e:
                 logger.error(f"Failed to send monthly report to Discord: {e}", exc_info=True)
         else:
-            logger.error("Census channel not found — snapshot will still be saved.")
+            logger.error("Census channel not found - snapshot will still be saved.")
 
-        # Salva snapshot corrente — DELETE + all INSERTs in ONE transaction so
+        # Salva snapshot corrente - DELETE + all INSERTs in ONE transaction so
         # a failure midway can never leave the snapshots table half-populated
         # (which would corrupt next month's "change since last month" math).
         snapshot_date = today.date()

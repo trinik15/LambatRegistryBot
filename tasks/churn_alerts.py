@@ -1,13 +1,13 @@
-"""Weekly churn alerts — nudge recruiters about inactive citizens.
+"""Weekly churn alerts - nudge recruiters about inactive citizens.
 
-ROADMAP Phase 5 (speculative → implemented): with enough activity data, a
+With enough activity data, a
 citizen going quiet is invisible until a human runs ``/report``. This task
 scans ``activity_cache`` weekly for citizens whose ``last_login`` exceeds
 ``CHURN_THRESHOLD_DAYS`` AND who have a recruiter on file, then DMs each
 recruiter a short nudge.
 
-Design notes
-------------
+Notes:
+
 * **No new table.** Cooldown is tracked via ``audit_log`` (action
   ``churn.nudge``): a citizen is skipped if a *delivered* nudge for them exists
   within ``CHURN_NUDGE_COOLDOWN_DAYS``. This reuses the audit infrastructure
@@ -15,9 +15,9 @@ Design notes
   Failed DMs (``delivered: false``) are audited too but excluded from the
   cooldown so they retry the following week.
 * **Best-effort DMs.** A recruiter may have DMs closed or have left the
-  server. Each send is wrapped in ``rate_limit_guard`` (Phase 4.3) and a
+  server. Each send is wrapped in ``rate_limit_guard`` and a
   try/except so one bad recipient never aborts the batch.
-* **Opt-in.** ``CHURN_NUDGES_ENABLED`` defaults false — DMing real humans is a
+* **Opt-in.** ``CHURN_NUDGES_ENABLED`` defaults false - DMing real humans is a
   deliberate operational choice, not something a fresh deploy should do.
 * **Weekly slot.** Mirrors ``role_sync``'s scheduling: a 24h loop whose
   ``before_loop`` aligns to ``CHURN_NUDGE_WEEKLY_DAY:CHURN_NUDGE_WEEKLY_HOUR``
@@ -147,7 +147,7 @@ class ChurnAlertsTask:
                     delivered += 1
                 else:
                     failed += 1
-            except Exception as e:  # noqa: BLE001 — one bad row must not abort the pass
+            except Exception as e:  # noqa: BLE001 - one bad row must not abort the pass
                 logger.error(
                     f"ChurnAlertsTask: error nudging recruiter {row['recruiter_discord_id']} "
                     f"about {row['ign']}: {e}",
@@ -164,7 +164,7 @@ class ChurnAlertsTask:
 
 
 # ---------------------------------------------------------------------------
-# DB helpers — kept module-level so they're individually testable/mockable.
+# DB helpers - kept module-level so they're individually testable/mockable.
 # ---------------------------------------------------------------------------
 
 
@@ -175,9 +175,9 @@ async def _fetch_candidates(threshold_days: int) -> list[dict]:
     inactive citizen gets their own row (shared responsibility). Adds a
     ``days_inactive`` int for the nudge embed.
 
-    Proposal 1: skips rows flagged ``stale`` (CivInfo auth was broken when the
+    Skips rows flagged ``stale`` (CivInfo auth was broken when the
     row was last checked, so ``last_login`` is aging and unreliable). Without
-    this guard, a CivInfo outage would cause false-positive nudges — a citizen
+    this guard, a CivInfo outage would cause false-positive nudges - a citizen
     who logged in yesterday would be flagged inactive just because CivInfo
     couldn't tell us. ``COALESCE(stale, FALSE)`` tolerates pre-migration rows
     where the column is NULL.
@@ -201,7 +201,7 @@ async def _fetch_candidates(threshold_days: int) -> list[dict]:
 async def _fetch_recently_nudged(cooldown_days: int) -> set[str]:
     """Return the set of IGNs with a *delivered* churn.nudge in the cooldown window.
 
-    Only delivered nudges count toward the cooldown — a failed DM (user closed
+    Only delivered nudges count toward the cooldown - a failed DM (user closed
     DMs / left the server) is audited with ``delivered: false`` and excluded
     here so it retries the following week.
     """
@@ -223,7 +223,7 @@ def _select_targets(candidates: list[dict], cooldown_igns: set[str]) -> list[dic
     Extracted so the dedup/cooldown logic is unit-testable without a DB. A
     citizen with multiple recruiters produces multiple candidate rows; the
     cooldown is per-IGN (any delivered nudge about X suppresses all recruiters
-    of X until the window expires) — simpler and less noisy than per-recruiter.
+    of X until the window expires) - simpler and less noisy than per-recruiter.
     """
     return [c for c in candidates if c["ign"] not in cooldown_igns]
 
@@ -267,7 +267,7 @@ async def _send_nudge(
         )
     except discord.HTTPException as e:
         logger.warning(f"Nudge DM failed for user {recruiter_discord_id}: {e}")
-    except Exception as e:  # noqa: BLE001 — never let a DM failure crash the pass
+    except Exception as e:  # noqa: BLE001 - never let a DM failure crash the pass
         logger.error(f"Unexpected error nudging user {recruiter_discord_id}: {e}", exc_info=True)
     return False
 
@@ -285,13 +285,13 @@ def _build_nudge_embed(
         title="📣 Citizen activity check",
         description=(
             "A citizen you recruited hasn't logged into CivMC in a while. "
-            "This is an automated nudge from the Lambat Registry bot — a quick "
+            "This is an automated nudge from the Lambat Registry bot - a quick "
             "check-in may help retain them."
         ),
         color=0xF39C12,
     )
     embed.add_field(name="Citizen", value=f"`{ign}`", inline=True)
-    embed.add_field(name="Settlement", value=settlement or "—", inline=True)
+    embed.add_field(name="Settlement", value=settlement or "-", inline=True)
     embed.add_field(
         name="Last login",
         value=f"{days} days ago ({last_login.strftime('%Y-%m-%d')})",

@@ -1,21 +1,21 @@
-"""Audit-log retention — nightly prune of old ``audit_log`` rows.
+"""Audit-log retention - nightly prune of old ``audit_log`` rows.
 
-Closes ROADMAP §6.2 (open decision: keep audit forever vs rolling retention).
+Opt-in via AUDIT_RETENTION_DAYS (default = keep everything).
 The default ``AUDIT_RETENTION_DAYS=0`` keeps everything (matches prior
-behaviour — text rows are cheap); set e.g. ``730`` for a 2-year rolling window.
+behaviour - text rows are cheap); set e.g. ``730`` for a 2-year rolling window.
 
-Design notes
-------------
-* **Scheduled, not event-driven.** Runs once a day at 03:30 UTC — deliberately
+Notes:
+
+* **Scheduled, not event-driven.** Runs once a day at 03:30 UTC - deliberately
   offset from the 02:00 ``daily_backup`` and ``daily_check`` jobs so the three
   nightly DB-heavy tasks don't contend for the asyncpg pool.
 * **Self-auditing.** When rows are removed, the task emits an ``audit.prune``
   entry (via ``services.audit.emit``) recording how many rows were deleted and
-  the retention window. The policy is therefore visible in ``/audit search`` —
+  the retention window. The policy is therefore visible in ``/audit search`` -
   a maintainer can see exactly when retention ran and what it removed.
 * **No-op when disabled.** ``AUDIT_RETENTION_DAYS <= 0`` short-circuits before
   any DB call, so deployments that keep audit forever pay zero cost (the loop
-  still wakes nightly, logs a DEBUG line, and sleeps — consistent with the
+  still wakes nightly, logs a DEBUG line, and sleeps - consistent with the
   other background tasks).
 """
 
@@ -30,7 +30,7 @@ from services import audit
 
 logger = logging.getLogger(__name__)
 
-# Run at 03:30 UTC — offset from daily_backup (02:00) and daily_check (02:00)
+# Run at 03:30 UTC - offset from daily_backup (02:00) and daily_check (02:00)
 # so the three nightly DB-heavy jobs don't contend for the pool. Same
 # compute-next-occurrence pattern as the other before_loop hooks.
 _PRUNE_HOUR = 3
@@ -59,7 +59,7 @@ class AuditRetentionTask:
             await self.bot.wait_until_ready()
             days = Config.AUDIT_RETENTION_DAYS
             if days <= 0:
-                # Retention disabled — keep everything. Log at DEBUG so the
+                # Retention disabled - keep everything. Log at DEBUG so the
                 # loop's wake cycle is traceable without spamming INFO.
                 logger.debug(
                     "Audit retention disabled (AUDIT_RETENTION_DAYS=%d); skipping prune.", days
@@ -67,7 +67,7 @@ class AuditRetentionTask:
                 return
             deleted = await audit.prune_older_than(days)
             logger.info("Audit retention prune: removed %d rows older than %d days.", deleted, days)
-            # Record that the prune ran — the retention policy is itself
+            # Record that the prune ran - the retention policy is itself
             # auditable. actor=None marks it as a system action (not a human).
             if deleted > 0:
                 await audit.emit(
