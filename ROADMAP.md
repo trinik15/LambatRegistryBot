@@ -21,14 +21,14 @@ history lives in the git log; this file is just the working list.
 
 ## Next (roughly in order)
 
-1. Finish the Filipino locale — only /help and the monthly report headers are
+1. Finish the Filipino locale - only /help and the monthly report headers are
    translated right now (locales/fil.json, 28 of 39 keys). Lambat being
    Filipino-themed, it'd be nice to have it complete.
 2. The `recruiter_ids` TEXT column and the `recruiters` junction table both
    get written today (dual-write). Once nothing reads the TEXT column
    anymore, drop it and keep only the junction.
 3. /server online relies on mcsrvstat's players.list, which vanilla servers
-   only fill via query protocol — CivMC's list can be partial or missing.
+   only fill via query protocol - CivMC's list can be partial or missing.
    Cross-checking with CivInfo (last_login > last_logout) may be more
    reliable; worth testing during a busy evening.
 4. Snapshot history lives in monthly_snapshots; older entries are never

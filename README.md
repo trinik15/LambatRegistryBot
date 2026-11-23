@@ -2,7 +2,7 @@
 
 A Discord bot for managing the citizen registry of the **Lambat nation** on
 [CivMC](https://civmc.net) (a Minecraft civilization server). Tracks citizens,
-settlements, activity, and population trends — and monitors the CivMC server
+settlements, activity, and population trends - and monitors the CivMC server
 for outages.
 
 ---
@@ -52,7 +52,7 @@ for outages.
 ## Prerequisites
 
 1. **Python 3.11+**
-2. **PostgreSQL 12+** (with the `citext` extension — the bot creates it
+2. **PostgreSQL 12+** (with the `citext` extension - the bot creates it
    automatically on startup)
 3. **`pg_dump` and `psql`** on the PATH (for backup/restore). On Debian/Ubuntu:
    `apt install postgresql-client`.
@@ -91,7 +91,7 @@ Edit `.env` and fill in **at least** these required values:
 | `DISCORD_TOKEN` | Discord Developer Portal → your application → Bot → Reset Token |
 | `DATABASE_URL` | Your Postgres connection string |
 | `OWNER_ID` | Right-click your own username in Discord → Copy ID (enable Developer Mode) |
-| `GUILD_ID` | Right-click your server name → Copy ID (**recommended** — enables instant command sync) |
+| `GUILD_ID` | Right-click your server name → Copy ID (**recommended** - enables instant command sync) |
 | `CITIZEN_ROLE_IDS` | Comma-separated role IDs the bot assigns to registered citizens |
 | `FULL_ACCESS_ROLE_IDS` | Comma-separated role IDs for council members who can add/remove citizens |
 
@@ -102,7 +102,7 @@ See `.env.example` for all options and their descriptions.
 The bot creates all tables and runs migrations automatically on startup (no
 manual SQL needed). The only requirement is that PostgreSQL is reachable and
 the `citext` extension can be created (the bot runs `CREATE EXTENSION IF NOT
-EXISTS citext` — the DB user needs CREATE privilege, which is the default for
+EXISTS citext` - the DB user needs CREATE privilege, which is the default for
 the database owner).
 
 ### 4. Run
@@ -119,7 +119,7 @@ that case, you can run `/sync` as the owner to force a re-sync).
 
 1. Use `/settlement add` to create your nation's settlements (e.g. "New
    September", "Timberbourg", …). Settlement names must match the Discord role
-   names you want the bot to assign — the bot looks up settlement roles by
+   names you want the bot to assign - the bot looks up settlement roles by
    name.
 2. Use `/citizen add` to register your first citizens. You'll need their IGN
    (Minecraft username), Discord user, and settlement.
@@ -134,7 +134,7 @@ testing flow into ~5 minutes of work. Run them in this order:
 ### 1. Pre-flight checks (before starting the bot)
 
 Validates that your `.env` is correct, the bot can reach your guild, the
-role hierarchy is right, channels are visible, and slash commands are synced —
+role hierarchy is right, channels are visible, and slash commands are synced -
 all without launching the full gateway.
 
 ```bash
@@ -178,16 +178,15 @@ python scripts/seed.py
 Idempotently inserts 5 settlements + 6 test citizens (with fake Discord IDs)
 so read commands like `/citizen list`, `/report census`, and
 `/settlement info` have something to show immediately. Re-run safely; pass
-`--reset` to wipe first. (This script does NOT touch Discord — use
+`--reset` to wipe first. (This script does NOT touch Discord - use
 `/citizen add` in Discord to test the role-assignment path with real users.)
 
 ### 5. Walk the command checklist
 
 Open [`scripts/E2E_CHECKLIST.md`](scripts/E2E_CHECKLIST.md) and tick through
-every slash command, grouped by phase. Covers all 25+ commands including
-Phase 3's CSV import, `/citizen search`, `/settlement info`, self-service
-`/apply`, activity charts, governance notifications, and the CivMC
-online-now list.
+every slash command. Covers all 25+ commands including the CSV import,
+`/citizen search`, `/settlement info`, self-service `/apply`, activity
+charts, governance notifications, and the CivMC online-now list.
 
 ### One-shot test loop
 
@@ -198,7 +197,7 @@ docker compose up --build -d    && \
 sleep 8                         && \
 ./scripts/smoke_check.sh        && \
 python scripts/seed.py          && \
-echo "✅ Ready for Discord E2E — open scripts/E2E_CHECKLIST.md"
+echo "✅ Ready for Discord E2E - open scripts/E2E_CHECKLIST.md"
 ```
 
 ```powershell
@@ -219,62 +218,62 @@ if ($LASTEXITCODE -eq 0) {
 The bot uses [CivInfo](https://civinfo.net) to check when citizens last logged
 into CivMC. The API now **requires authentication**. To get a key:
 
-1. Email `minecraft.gjum@gmail.com` requesting a CivInfo API key.
+1. Contact **Huskydog9988** requesting a CivInfo API key (the API's own 401 message says so).
 2. Set `CIVINFO_API_KEY=your_key` in `.env`.
 
-**Without a key**, the bot still works — it degrades gracefully:
+**Without a key**, the bot still works - it degrades gracefully:
 - `/citizen add` succeeds with a warning ("Activity Unverified").
 - `/report census` and `/report stats` show "⚠️ Activity data unavailable"
   instead of fake "0 active" counts.
 - `/citizen dossier` shows ⚪ "API Auth Required" for activity.
 
-### Phase A: mc-accounts/full endpoint + richer activity data
+### mc-accounts/full endpoint + richer activity data
 
 The bot now calls the **`mc-accounts/full`** endpoint (instead of the legacy
 `mc-sessions/all`). One call returns `first_joined`, `last_login`, AND
-`last_logout` — giving us three capabilities we didn't have before:
+`last_logout` - giving us three capabilities we didn't have before:
 
-- **"Online now" detection** — `last_login > last_logout` means the player is
+- **"Online now" detection** - `last_login > last_logout` means the player is
   currently logged in, with no separate mcsrvstat.us call needed.
-- **First-joined date** — when the player first joined CivMC (distinct from
+- **First-joined date** - when the player first joined CivMC (distinct from
   our registry `join_date`, which is when they joined Lambat).
-- **Accurate activity metrics** — the daily activity loop now persists to the
+- **Accurate activity metrics** - the daily activity loop now persists to the
   `activity_cache` DB table (previously only the in-memory cache was refreshed,
   so the `ACTIVE_CITIZENS` Prometheus gauge and `/report export` were stale).
 
-Additional env vars (all have sensible defaults — only override for testing):
-- `CIVINFO_API_BASE` — defaults to `https://api.civinfo.net`.
-- `CIVINFO_MC_SERVER` — defaults to `play.civmc.net` (the full server address,
-  matching Gjum's official frontend — not the short form `civmc`).
-- `CIVINFO_FRONTEND_VERSION` — the `civinfo-version` header git hash, sent on
+Additional env vars (all have sensible defaults - only override for testing):
+- `CIVINFO_API_BASE` - defaults to `https://api.civinfo.net`.
+- `CIVINFO_MC_SERVER` - defaults to `play.civmc.net` (the full server address,
+  matching Gjum's official frontend - not the short form `civmc`).
+- `CIVINFO_FRONTEND_VERSION` - the `civinfo-version` header git hash, sent on
   every request to mirror the official frontend. Observational today; update
   if Gjum ever makes it required.
 
-### Phase B: /server trends + /factory commands
+### /server trends + /factory commands
 
-Two new capabilities built on the Phase A foundation:
+Two newer capabilities built on the mc-accounts/full work:
 
-**`/server trends`** — Historical player-count sparkline via the CivInfo
+**`/server trends`** - Historical player-count sparkline via the CivInfo
 `mc-server-status/{server}/{period}` endpoint. Shows a 24h/hour/minute
 player-count chart with peak/low/average annotations. Complements
-`/server status` (live, via mcsrvstat.us) — trends show *when* CivMC is busy,
+`/server status` (live, via mcsrvstat.us) - trends show *when* CivMC is busy,
 not just *whether* it's up. Requires `CIVINFO_API_KEY` (shares the same auth
 as activity tracking). Cached 60s.
 
-**`/factory info|list|recipe`** — FactoryMod recipe lookup with **no API key
-needed**. The `factorymod.civinfo.net` website has no API — it's a static SPA
+**`/factory info|list|recipe`** - FactoryMod recipe lookup with **no API key
+needed**. The `factorymod.civinfo.net` website has no API - it's a static SPA
 that fetches `config.yml` directly from `github.com/CivMC/Civ`. We do the
 same: fetch the 482 KB YAML once per hour, cache it, and serve all 61 factories
 + 641 recipes from the cache. The cog auto-loads via `main.py`'s cog discovery.
 
-- `/factory info <name>` — setup cost (items + amounts) + recipe list.
-- `/factory list` — all 61 factories grouped by type (FCC, etc.).
-- `/factory recipe <id>` — inputs, outputs (with chances for RANDOM type),
+- `/factory info <name>` - setup cost (items + amounts) + recipe list.
+- `/factory list` - all 61 factories grouped by type (FCC, etc.).
+- `/factory recipe <id>` - inputs, outputs (with chances for RANDOM type),
   and production time.
 
 ### Why can't we look up citizens by Discord UID?
 
-**Short answer:** CivInfo doesn't expose Discord UIDs — only Minecraft IGNs,
+**Short answer:** CivInfo doesn't expose Discord UIDs - only Minecraft IGNs,
 UUIDs, and login timestamps. The Discord↔Minecraft link lives in Gjum's Kira
 bridge (a separate service with its own `users` table: `discord_id ↔ uuid ↔
 mc_name`), and **Kira's table is not exposed via any civinfo API endpoint**.
@@ -284,7 +283,7 @@ frontend JS bundle and reading the `Gjum/Kira` source):
 
 - The 4 endpoints on `api.civinfo.net` are: `mc-accounts/full`,
   `mc-sessions/all`, `mc-server-status/{server}/{period}`, and the FactoryMod
-  config SPA. None of them return a `discord_id` field — not even
+  config SPA. None of them return a `discord_id` field - not even
   `mc-accounts/full`, which returns `uuid`, `mc_name`, `first_joined`,
   `last_login`, `last_logout` only.
 - The `civinfo-version: git:<hash>` header Gjum's frontend sends is for
@@ -292,7 +291,7 @@ frontend JS bundle and reading the `Gjum/Kira` source):
 - The Kira bridge (`users.discord_id`) is populated by the in-game Kira
   plugin when a player runs `/discord link` on CivMC. Kira exposes that data
   to **Minecraft players in-game** (via `/discord whois <ign>`) and to the
-  CivMC Discord via a bot command — but **not to third-party bots** via an
+  CivMC Discord via a bot command - but **not to third-party bots** via an
   HTTP API. There is no public Kira REST/WebSocket endpoint we can call.
 
 **What this means for the bot:**
@@ -301,7 +300,7 @@ frontend JS bundle and reading the `Gjum/Kira` source):
   column (populated at `/citizen add` time), NOT civinfo. It only finds
   citizens that have already been registered with us.
 - `/citizen add <ign> <@discord_user>` requires the Discord user to be
-  passed explicitly — we cannot derive it from the IGN via CivInfo.
+  passed explicitly - we cannot derive it from the IGN via CivInfo.
 - The `recruiters.recruiter_discord_id` junction is also our own data, not
   a CivInfo lookup.
 
@@ -309,7 +308,7 @@ frontend JS bundle and reading the `Gjum/Kira` source):
 across all of CivMC (not just Lambat's registry), the only paths are
 (1) running a Kira instance ourselves (heavy, requires a CivMC plugin slot),
 or (2) asking Gjum to expose Kira's `users` table via the civinfo API (asked
-once via `minecraft.gjum@gmail.com`, declined as out of scope).
+once, declined as out of scope).
 
 ---
 
@@ -354,40 +353,40 @@ a companion `.sql.meta` file with the type, note, and timestamp.
 ## Architecture
 
 ```
-main.py                  — Bot entry point (LambatRegistryBot), setup_hook, /sync command, error handler
+main.py                  - Bot entry point (LambatRegistryBot), setup_hook, /sync command, error handler
 core/
-  config.py              — Environment-based configuration (validated on import)
-  database.py            — asyncpg connection pool + idempotent schema migrations
-  constants.py           — Colors, limits, Lambat settlement/duchy emoji mappings
+  config.py              - Environment-based configuration (validated on import)
+  database.py            - asyncpg connection pool + idempotent schema migrations
+  constants.py           - Colors, limits, Lambat settlement/duchy emoji mappings
 api/
-  civinfo_api.py         — CivInfo activity client (per-entry TTL cache, auth-broken
+  civinfo_api.py         - CivInfo activity client (per-entry TTL cache, auth-broken
                            graceful degradation)
 services/
-  backup.py              — pg_dump/psql wrapper (path-traversal-safe, timeout-protected,
+  backup.py              - pg_dump/psql wrapper (path-traversal-safe, timeout-protected,
                            off-site sink upload + retention pruning)
-  backup_sinks.py        — Pluggable off-site backup destinations (local / S3 / GCS)
-  role_manager.py        — Discord role assignment/removal (case-insensitive, Forbidden handling)
-  charts.py              — matplotlib (Agg) chart rendering for /report trends
+  backup_sinks.py        - Pluggable off-site backup destinations (local / S3 / GCS)
+  role_manager.py        - Discord role assignment/removal (case-insensitive, Forbidden handling)
+  charts.py              - matplotlib (Agg) chart rendering for /report trends
 tasks/
-  activity_monitor.py    — Daily activity check + monthly census report + snapshots
-  uptime_monitor.py      — Edge-triggered CivMC outage/recovery alerts
+  activity_monitor.py    - Daily activity check + monthly census report + snapshots
+  uptime_monitor.py      - Edge-triggered CivMC outage/recovery alerts
 cogs/
-  citizen.py             — /citizen add, update, remove, list, dossier
-  settlement.py          — /settlement add, remove, list
-  reports.py             — /report census, stats, trends, export
-  server.py              — /server status, ping (mcsrvstat.us)
-  data.py                — /data backup, list_backups, restore
-  help.py                — /help command
+  citizen.py             - /citizen add, update, remove, list, dossier
+  settlement.py          - /settlement add, remove, list
+  reports.py             - /report census, stats, trends, export
+  server.py              - /server status, ping (mcsrvstat.us)
+  data.py                - /data backup, list_backups, restore
+  help.py                - /help command
 web/
-  health.py              — Keep-alive + /healthz (honest liveness) + /metrics (Prometheus)
-utils.py                 — PaginationView, date parsing/formatting helpers
-scripts/                 — E2E testing toolkit (see "Quick E2E testing" above)
-  preflight.py           — Pre-launch checks: token, guild, role hierarchy, channels, sync
-  seed.py                — Idempotent test-data seeder (5 settlements + 6 citizens)
-  smoke_check.sh         — /healthz + /metrics HTTP smoke check (Mac/Linux/Git Bash)
-  smoke_check.ps1        — Same, native Windows PowerShell version
-  E2E_CHECKLIST.md       — 25+ command walk-through, grouped by phase
-docker-compose.yml       — Postgres 16 + bot, wired together with healthcheck
+  health.py              - Keep-alive + /healthz (honest liveness) + /metrics (Prometheus)
+utils.py                 - PaginationView, date parsing/formatting helpers
+scripts/                 - E2E testing toolkit (see "Quick E2E testing" above)
+  preflight.py           - Pre-launch checks: token, guild, role hierarchy, channels, sync
+  seed.py                - Idempotent test-data seeder (5 settlements + 6 citizens)
+  smoke_check.sh         - /healthz + /metrics HTTP smoke check (Mac/Linux/Git Bash)
+  smoke_check.ps1        - Same, native Windows PowerShell version
+  E2E_CHECKLIST.md       - 25+ command walk-through, grouped by phase
+docker-compose.yml       - Postgres 16 + bot, wired together with healthcheck
 ```
 
 ---
@@ -428,7 +427,7 @@ Minecraft usernames are case-insensitive. The `citizens.ign` and
 |---|---|
 | Slash commands don't appear | Run `/sync` (owner only). If `GUILD_ID` is not set, commands may take up to 1 hour to propagate globally. |
 | "Bot lacks permission to assign roles" | Move the bot's top role ABOVE the roles it manages (Citizen, Settler, settlement roles) in Server Settings → Roles. |
-| Activity shows ⚪ for everyone | `CIVINFO_API_KEY` is not set or was rejected. Email minecraft.gjum@gmail.com for a key. The bot still works without it. |
+| Activity shows ⚪ for everyone | `CIVINFO_API_KEY` is not set or was rejected. Contact Huskydog9988 for a key. The bot still works without it. |
 | `/citizen add` says "IGN not found" | The IGN doesn't exist on CivMC (or CivInfo is down). Check the spelling. |
 | Monthly report not posted | Check `MONTHLY_REPORT_CHANNEL_ID` is set and the bot can send messages there. The report runs on the 1st of each month at 02:00 UTC. |
 | No outage alerts | Check `ALERT_CHANNEL_ID` is set. The monitor still runs (check logs) even if the channel is 0. |

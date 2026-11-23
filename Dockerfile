@@ -25,7 +25,7 @@ ENV PORT=10000
 
 # HEALTHCHECK probes the real /healthz endpoint, which
 # returns 200 ONLY when the Discord gateway is connected AND the DB pool is
-# live. This is honest — a container that loses its DB connection or Discord
+# live. This is honest - a container that loses its DB connection or Discord
 # gateway will be marked unhealthy and restarted by the orchestrator, instead
 # of silently running in a degraded state.
 #
@@ -37,7 +37,7 @@ ENV PORT=10000
 #                         (setup_hook syncs commands, which can take a few seconds)
 #   --interval=30s      : poll every 30s (frequent enough to catch a wedged
 #                         gateway, not so frequent it spams the health server)
-#   --timeout=5s        : /healthz does a SELECT 1 + bot.is_ready() check —
+#   --timeout=5s        : /healthz does a SELECT 1 + bot.is_ready() check -
 #                         should return in well under 1s; 5s is a generous ceiling
 #   --retries=3         : 3 consecutive failures = unhealthy (≈90s of downtime)
 HEALTHCHECK --start-period=15s --interval=30s --timeout=5s --retries=3 \

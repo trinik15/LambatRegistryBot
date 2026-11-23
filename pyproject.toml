@@ -1,5 +1,5 @@
 # =============================================================================
-# Lambat Registry Bot — project metadata, tooling, and packaging config.
+# Lambat Registry Bot - project metadata, tooling, and packaging config.
 # =============================================================================
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -51,7 +51,7 @@ Homepage = "https://github.com/trinik15/LambatRegistryBot"
 py-modules = []
 
 # -----------------------------------------------------------------------------
-# Ruff — lint + format (replaces black + flake8 + isort).
+# Ruff - lint + format (replaces black + flake8 + isort).
 # -----------------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
@@ -63,9 +63,9 @@ extend-exclude = ["backups", "build", "dist"]
 # B = bugbear, SIM = simplify, C4 = comprehensions.
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4"]
 ignore = [
-    "E501",   # line length — handled by the formatter; long URLs/SQL are fine
+    "E501",   # line length - handled by the formatter; long URLs/SQL are fine
     "B008",   # function call in default argument (used for discord app_commands)
-    "SIM108", # ternary vs if/else — readability preference
+    "SIM108", # ternary vs if/else - readability preference
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -76,13 +76,13 @@ quote-style = "double"
 indent-style = "space"
 
 # -----------------------------------------------------------------------------
-# Mypy — static type checking.
+# Mypy - static type checking.
 #
 # Baseline policy: a GREEN, useful CI gate. We check untyped function
 # bodies (check_untyped_defs) and flag returning Any, but we do NOT yet require
-# every function to be typed (disallow_untyped_defs=false) — the existing
-# codebase predates this policy. We'll tighten to strict once core/ and
-# services/ signatures are annotated.
+# every function to be typed (disallow_untyped_defs=false) - the existing
+# codebase predates this policy. Tightening to strict on core/ and services/
+# once core/ and services/ get proper annotations we can tighten it.
 # -----------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
@@ -107,7 +107,7 @@ disallow_untyped_defs = false
 
 # numpy's bundled stubs (pulled in transitively via matplotlib) use Python 3.12
 # `type` statement syntax that mypy in 3.11-target mode can't parse. This is a
-# numpy-stub issue, not ours — ignore errors inside numpy itself so our own
+# numpy-stub issue, not ours - ignore errors inside numpy itself so our own
 # type-checking isn't blocked by a third-party stub.
 [[tool.mypy.overrides]]
 module = ["numpy.*"]
