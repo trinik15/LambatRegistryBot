@@ -17,7 +17,7 @@ Exits 0 if every check passes, 1 if any fail. Designed to be called by
 ``scripts/run_e2e.ps1`` (stage S11) but also works standalone:
 
     python scripts/db_verify.py
-    DATABASE_URL=postgresql://lambat:lambat_dev_password@localhost:5432/lambat \
+    DATABASE_URL=postgresql://lambat:lambat_dev_password@localhost:5432/lambat \\
         python scripts/db_verify.py --json
 """
 
