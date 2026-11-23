@@ -1,4 +1,4 @@
-"""Audit log search cog (Phase 2.1).
+"""Audit log search cog.
 
 Exposes ``/audit search`` to Council members with filters by actor, action,
 target IGN, and date range. Results are paginated via ``PaginationView``.
@@ -118,7 +118,7 @@ def _build_audit_embeds(rows: list[dict], requested_limit: int) -> list[discord.
         chunk = rows[i : i + per_page]
         embed = discord.Embed(
             title="📜 Audit Log",
-            description=f"Showing {i + 1}–{i + len(chunk)} of {len(rows)} entries",
+            description=f"Showing {i + 1}-{i + len(chunk)} of {len(rows)} entries",
             color=0x7289DA,
         )
         for r in chunk:
@@ -128,8 +128,8 @@ def _build_audit_embeds(rows: list[dict], requested_limit: int) -> list[discord.
             else:
                 ts_str = ts.strftime("%Y-%m-%d %H:%M UTC")
             actor_id = r["actor_discord_id"]
-            actor_str = f"<@{actor_id}>" if actor_id else "—"
-            target_str = r["target_ign"] or "—"
+            actor_str = f"<@{actor_id}>" if actor_id else "-"
+            target_str = r["target_ign"] or "-"
             details_str = _format_details(r["details"])
             label = f"`{r['action']}` • {ts_str}"
             value = f"**Actor:** {actor_str}\n**Target:** `{target_str}`\n{details_str}"
@@ -157,7 +157,7 @@ def _format_details(details) -> str:
     if not isinstance(details, dict):
         return f"**Details:** {details}"
     # Reuse the audit summariser for a consistent look with the channel mirror.
-    return audit._summarise_details(details)  # noqa: SLF001 — same package intent
+    return audit._summarise_details(details)  # noqa: SLF001 - same package intent
 
 
 async def setup(bot):

@@ -1,4 +1,4 @@
-"""Self-service applications cog — Phase 3.4.
+"""Self-service applications cog.
 
 Non-citizens run ``/apply ign settlement recruiter`` to submit a citizenship
 application. The application is posted to APPLICATIONS_CHANNEL_ID with
@@ -24,7 +24,7 @@ _IGN_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 
 
 class ApplicationsCog(commands.Cog):
-    """``/apply`` + ``/application list`` — self-service citizenship."""
+    """``/apply`` + ``/application list`` - self-service citizenship."""
 
     application_group = app_commands.Group(
         name="application", description="Manage citizen applications"
@@ -55,7 +55,7 @@ class ApplicationsCog(commands.Cog):
         settlement: str,
         recruiter: discord.User | None = None,
     ):
-        """Phase 3.4: self-service application submission."""
+        """Self-service application submission."""
         # Validate IGN.
         ign = ign.strip()
         if not _IGN_PATTERN.match(ign):
@@ -131,7 +131,7 @@ class ApplicationsCog(commands.Cog):
                 f"Your application for citizenship has been submitted!\n\n"
                 f"**IGN:** {ign}\n"
                 f"**Settlement:** {settlement}\n"
-                f"**Recruiter:** {recruiter.mention if recruiter else '—'}\n"
+                f"**Recruiter:** {recruiter.mention if recruiter else '-'}\n"
                 f"**Application ID:** #{app_row['id']}\n\n"
                 f"Council will review your application shortly."
             ),
@@ -206,7 +206,7 @@ class ApplicationsCog(commands.Cog):
                 f" (via <@{app['recruiter_discord_id']}>)" if app["recruiter_discord_id"] else ""
             )
             embed.add_field(
-                name=f"#{app['id']} — {app['ign']}",
+                name=f"#{app['id']} - {app['ign']}",
                 value=f"<@{app['applicant_discord_id']}> → {app['settlement']}{recruiter_str}",
                 inline=False,
             )
@@ -214,7 +214,7 @@ class ApplicationsCog(commands.Cog):
 
 
 class ApplicationReviewView(discord.ui.View):
-    """Approve/Reject buttons on the application review message (Phase 3.4)."""
+    """Approve/Reject buttons on the application review message."""
 
     def __init__(self, app_id: int, bot):
         super().__init__(timeout=None)
@@ -293,7 +293,7 @@ class ApplicationReviewView(discord.ui.View):
 
 
 async def _approve_and_create_citizen(app_row: dict, approver_id: int, bot) -> None:
-    """Run the citizen_add path for an approved application (Phase 3.4).
+    """Run the citizen_add path for an approved application.
 
     Inserts the citizen, writes recruiters junction rows, emits audit + governance.
     Role assignment is handled by the role_sync weekly task (or council can
@@ -337,7 +337,7 @@ async def _approve_and_create_citizen(app_row: dict, approver_id: int, bot) -> N
             connection=conn,
         )
 
-    # Post-commit: mirror to audit channel + governance channel (Phase 3.7).
+    # Post-commit: mirror to audit channel + governance channel.
     audit_details = {
         "discord_id": discord_id,
         "settlement": settlement,

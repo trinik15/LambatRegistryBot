@@ -1,8 +1,8 @@
-"""Emoji management cog (Phase 2.4).
+"""Emoji management cog.
 
 Exposes ``/emoji set`` (Council) and ``/emoji list`` for runtime management of
 the guild_emojis mapping. This decouples reports/monthly-report rendering from
-one guild's hardcoded custom-emoji IDs — a guild migration or a different
+one guild's hardcoded custom-emoji IDs - a guild migration or a different
 nation reusing the bot only needs a Discord command, not a code change.
 """
 

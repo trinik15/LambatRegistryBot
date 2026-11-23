@@ -1,4 +1,4 @@
-"""Phase 4.6: snapshot annotations.
+"""Snapshot annotations.
 
 Council-only commands to annotate ``monthly_snapshots`` with free-text context
 ("post-exodus census", "snapshot taken during the Great Diamond Crisis week").
@@ -7,9 +7,9 @@ attach historical context after the fact, so future ``/report trends`` views
 can surface the annotation alongside the numbers.
 
 Commands:
-  /snapshot annotate <date> <note>  — set or replace the note for a snapshot date
-  /snapshot list                     — list all snapshots that have a note
-  /snapshot clear <date>             — remove the note for a snapshot date
+  /snapshot annotate <date> <note>  - set or replace the note for a snapshot date
+  /snapshot list                     - list all snapshots that have a note
+  /snapshot clear <date>             - remove the note for a snapshot date
 
 All mutations emit to ``audit_log`` (action=``snapshot.annotate``) so the change
 is auditable like every other registry mutation.
@@ -46,13 +46,13 @@ def _format_list_line(date_str: str, note: str) -> str:
     note = (note or "").strip()
     if len(note) > LIST_NOTE_TRUNCATE:
         note = note[: LIST_NOTE_TRUNCATE - 3] + "..."
-    return f"• **{date_str}** — {note}"
+    return f"• **{date_str}** - {note}"
 
 
 def _build_annotate_embed(rows_updated: int, date_str: str, note: str) -> discord.Embed:
     """Build the success embed shown after /snapshot annotate.
 
-    Pure helper — caller passes the already-formatted date string + the note
+    Pure helper - caller passes the already-formatted date string + the note
     + the row count returned by UPDATE ... WHERE snapshot_date = $1.
     """
     embed = discord.Embed(
@@ -98,7 +98,7 @@ def _build_clear_embed(rows_updated: int, date_str: str) -> discord.Embed:
 
 
 class SnapshotCog(commands.Cog):
-    """Council-only snapshot annotation commands (Phase 4.6)."""
+    """Council-only snapshot annotation commands."""
 
     def __init__(self, bot):
         self.bot = bot
@@ -165,7 +165,7 @@ class SnapshotCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         # UPDATE every row for this date in one shot. If no rows exist, the
-        # monthly report hasn't run for that date yet — we refuse rather than
+        # monthly report hasn't run for that date yet - we refuse rather than
         # silently no-op'ing, so the council knows nothing changed.
         rows_updated = await db.execute_query(
             "UPDATE monthly_snapshots SET notes = $1 WHERE snapshot_date = $2",
@@ -181,7 +181,7 @@ class SnapshotCog(commands.Cog):
             )
             return
 
-        # Audit-log the annotation (target_ign=None — this isn't a citizen op).
+        # Audit-log the annotation (target_ign=None - this isn't a citizen op).
         await audit.emit(
             audit.SNAPSHOT_ANNOTATE,
             str(interaction.user.id),
@@ -241,7 +241,7 @@ class SnapshotCog(commands.Cog):
         """Clear the note on every snapshot row for a given date.
 
         Sets ``notes = NULL`` for all rows with ``snapshot_date = $1``. The
-        snapshot data (total/active counts) is preserved — only the annotation
+        snapshot data (total/active counts) is preserved - only the annotation
         is removed.
         """
         if not self.has_full_access(interaction):

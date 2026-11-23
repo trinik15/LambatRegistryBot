@@ -1,4 +1,4 @@
-"""FactoryMod recipe cog — /factory info|list|recipe (Phase B, WS-6).
+"""FactoryMod recipe cog - /factory info|list|recipe.
 
 CivMC relevance: FactoryMod is the core production mechanic on CivMC. Players
 need to know setup costs and recipe inputs before committing resources. This
@@ -26,7 +26,7 @@ MAX_RECIPE_FIELDS = 15
 
 
 class FactoryCog(commands.Cog):
-    """``/factory info|list|recipe`` — FactoryMod recipe lookup."""
+    """``/factory info|list|recipe`` - FactoryMod recipe lookup."""
 
     factory_group = app_commands.Group(
         name="factory", description="FactoryMod recipe and setup-cost lookup"
@@ -158,7 +158,7 @@ def _build_factory_embed(factory_key: str, factory: dict, config: dict) -> disco
     embed = discord.Embed(
         title=f"🏭 {display_name}",
         description=f"Type: `{factory_type}` • Key: `{factory_key}`",
-        color=0xFAA61A,  # amber — industrial
+        color=0xFAA61A,  # amber - industrial
     )
 
     # Setup cost
@@ -173,9 +173,9 @@ def _build_factory_embed(factory_key: str, factory: dict, config: dict) -> disco
             inline=False,
         )
     else:
-        embed.add_field(name="🔧 Setup Cost", value="*(none — default factory)*", inline=False)
+        embed.add_field(name="🔧 Setup Cost", value="*(none - default factory)*", inline=False)
 
-    # Recipes — show up to MAX_RECIPE_FIELDS as a list, rest as compact string.
+    # Recipes - show up to MAX_RECIPE_FIELDS as a list, rest as compact string.
     if recipes_list:
         recipe_details = factorymod_api.get_factory_recipes(config, factory_key)
         recipe_lines = []
@@ -191,7 +191,7 @@ def _build_factory_embed(factory_key: str, factory: dict, config: dict) -> disco
         if len(recipe_details) > MAX_RECIPE_FIELDS:
             remaining = len(recipe_details) - MAX_RECIPE_FIELDS
             recipe_lines.append(
-                f"*...and {remaining} more — use /factory recipe <id> for details.*"
+                f"*...and {remaining} more - use /factory recipe <id> for details.*"
             )
 
         embed.add_field(
@@ -205,7 +205,7 @@ def _build_factory_embed(factory_key: str, factory: dict, config: dict) -> disco
 
 
 def _build_factory_list_embed(factories: dict) -> discord.Embed:
-    """Build the embed for /factory list — all factories grouped by type."""
+    """Build the embed for /factory list - all factories grouped by type."""
     # Group factories by type.
     by_type: dict[str, list[tuple[str, str]]] = {}
     for key, factory in factories.items():
@@ -246,7 +246,7 @@ def _build_recipe_embed(recipe_id: str, recipe: dict) -> discord.Embed:
         color=0x3BAD4C,
     )
 
-    # Input (singular in FactoryMod config — one input slot per recipe).
+    # Input (singular in FactoryMod config - one input slot per recipe).
     input_data = recipe.get("input")
     if input_data:
         if isinstance(input_data, dict):
@@ -263,7 +263,7 @@ def _build_recipe_embed(recipe_id: str, recipe: dict) -> discord.Embed:
     else:
         embed.add_field(name="Input", value="*(none)*", inline=False)
 
-    # Outputs (dict — for RANDOM type, each has a chance; for PRODUCTION, fixed).
+    # Outputs (dict - for RANDOM type, each has a chance; for PRODUCTION, fixed).
     outputs = recipe.get("outputs")
     if outputs and isinstance(outputs, dict):
         output_lines = []

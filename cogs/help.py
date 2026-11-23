@@ -16,7 +16,7 @@ class HelpCog(commands.Cog):
 
     @app_commands.command(name="help", description="Show help and available commands")
     async def help(self, interaction: discord.Interaction):
-        # Phase 4.5: all user-facing strings are looked up via tr(), which
+        # All user-facing strings are looked up via tr(), which
         # reads from locales/{en,fil}.json. The default lang is Config.LOCALE
         # (env var LOCALE); individual calls can override, but /help uses the
         # configured default so a Filipino-themed deployment just sets
