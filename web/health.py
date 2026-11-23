@@ -131,7 +131,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
 
         body_lines = [
             "{",
-            f'  "status": "{"ok" if healthy else "degraded"}',
+            f'  "status": "{"ok" if healthy else "degraded"}",',
             f'  "discord_gateway": {str(gateway_ok).lower()},',
             f'  "database": {str(db_ok).lower()},',
             f'  "civinfo_ok": {str(civinfo_ok).lower()},',
