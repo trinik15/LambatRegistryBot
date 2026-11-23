@@ -1,6 +1,6 @@
-"""CivInfo API client — player activity + (future) server-status history.
+"""CivInfo API client - player activity + (future) server-status history.
 
-Phase A refactor (see research/civinfo-api-improvement-plan.md):
+Recent refactor:
   * Switched endpoint ``mc-sessions/all`` -> ``mc-accounts/full``. The new
     endpoint returns ``first_joined``, ``last_login`` AND ``last_logout`` in
     a single call (the old one only gave ``loginTimestamps``). We can now
@@ -15,7 +15,7 @@ Phase A refactor (see research/civinfo-api-improvement-plan.md):
     ``mcName`` query param (not the legacy ``mcNames`` plural), and always pass
     ``mcServer`` explicitly (the official frontend never omits it).
 
-The honest-degradation contract is unchanged: on 401/403 we set an auth-broken
+Degradation behaviour: on 401/403 we set an auth-broken
 flag (TTL 10 min, warns once) so callers show "Activity data unavailable"
 instead of silently reporting fake "0 active" counts.
 """
@@ -53,7 +53,7 @@ AUTH_BROKEN_TTL = 600  # 10 min
 # --- PlayerActivity ---------------------------------------------------------
 # Replaces the old ``(status, emoji, last_login, status_text)`` 4-tuple.
 # Frozen + slots so it's immutable and cheap; callers access fields by name
-# (pa.emoji, pa.last_login) — no more fragile positional unpacking.
+# (pa.emoji, pa.last_login) - no more fragile positional unpacking.
 @dataclass(frozen=True, slots=True)
 class PlayerActivity:
     """A single player's CivMC activity, as returned by mc-accounts/full.
@@ -64,7 +64,7 @@ class PlayerActivity:
     timezone-aware UTC datetimes, or ``None`` when unknown.
 
     The ``is_online`` property derives "currently logged in" from
-    ``last_login > last_logout`` — no separate mcsrvstat.us call needed.
+    ``last_login > last_logout`` - no separate mcsrvstat.us call needed.
     """
 
     status: str
@@ -103,13 +103,13 @@ class CivInfoCache:
         if ign in self.cache:
             data, timestamp, ttl = self.cache[ign]
             if datetime.now(UTC).timestamp() - timestamp < ttl:
-                # Phase 1.5: count cache hits so /metrics can show the hit rate
+                # count cache hits so /metrics can show the hit rate
                 # (a high hit rate means we're saving CivInfo API calls).
                 try:
                     from core.metrics import record_cache_hit
 
                     record_cache_hit()
-                except Exception:  # noqa: BLE001 — metrics must never break lookups
+                except Exception:  # noqa: BLE001 - metrics must never break lookups
                     pass
                 return data
             else:
@@ -119,7 +119,7 @@ class CivInfoCache:
     def set(self, ign: str, data: PlayerActivity, ttl: int | None = None):
         """Store a PlayerActivity with current timestamp.
 
-        ``ttl`` overrides the default TTL — used to keep error / not_found
+        ``ttl`` overrides the default TTL - used to keep error / not_found
         results around for a shorter window so a transient CivInfo outage
         doesn't blacklist a player for the full success TTL.
         """
@@ -156,7 +156,7 @@ def is_auth_broken() -> bool:
     if not _auth_broken_until:
         return False
     if datetime.now(UTC).timestamp() > _auth_broken_until:
-        # TTL expired — allow a retry; the warning may fire again if still broken.
+        # TTL expired - allow a retry; the warning may fire again if still broken.
         _auth_broken_until = 0.0
         return False
     return True
@@ -182,7 +182,7 @@ def _clear_auth_broken():
     """Reset the auth-broken flag (e.g. after a successful call)."""
     global _auth_broken_until, _auth_warned
     if _auth_broken_until:
-        logger.info("CivInfo API auth recovered — activity data is available again.")
+        logger.info("CivInfo API auth recovered - activity data is available again.")
     _auth_broken_until = 0.0
     _auth_warned = False
 
@@ -250,10 +250,10 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Playe
     """Fetch a single player's CivMC activity via the mc-accounts/full endpoint.
 
     Returns a :class:`PlayerActivity` with ``status`` one of:
-      * ``"ok"``        — account found; ``last_login`` / ``last_logout`` /
+      * ``"ok"``        - account found; ``last_login`` / ``last_logout`` /
         ``first_joined`` populated.
-      * ``"not_found"`` — account doesn't exist on CivMC (likely a typo).
-      * ``"error"``     — API failure (timeout, non-200, auth broken).
+      * ``"not_found"`` - account doesn't exist on CivMC (likely a typo).
+      * ``"error"``     - API failure (timeout, non-200, auth broken).
 
     On 401/403, marks the API as auth-broken (see :func:`is_auth_broken`) so
     callers degrade honestly instead of showing fake "0 active" counts.
@@ -264,7 +264,7 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Playe
     if cached:
         return cached
 
-    # If we already know auth is broken, don't hammer the API — return an
+    # If we already know auth is broken, don't hammer the API - return an
     # honest "unavailable" result immediately. The cache TTL on these is
     # short so we retry periodically (via is_auth_broken's own TTL).
     if is_auth_broken():
@@ -303,7 +303,7 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Playe
                 return result
 
             data = await resp.json()
-            # A successful 200 means our auth works — clear any stale broken flag.
+            # A successful 200 means our auth works - clear any stale broken flag.
             _clear_auth_broken()
 
             # mc-accounts/full returns {"accounts": [{uuid, mc_name, first_joined,
@@ -353,18 +353,18 @@ async def get_player_activity(ign: str, session: aiohttp.ClientSession) -> Playe
         return result
 
 
-# --- Server status history (WS-5) -------------------------------------------
+# --- Server status history ---------------------------------------------------
 # GET /mc-server-status/{mcServer}/{period} returns a historical time series
 # of player counts: {"timestamps": [int, ...], "playerCounts": [int, ...]}.
 # period ∈ {"day", "hour", "minute"}. Different from mcsrvstat.us (which is
-# live-only) — this endpoint gives trends, not current status.
+# live-only) - this endpoint gives trends, not current status.
 
 # Historical data changes at most once per minute, so a short TTL is fine.
 # The official frontend doesn't cache this at all (re-fetches on every render),
-# but we do — Discord commands shouldn't hammer a third-party API on cooldown.
+# but we do - Discord commands shouldn't hammer a third-party API on cooldown.
 SERVER_STATUS_CACHE_TTL = 60  # 1 min
 
-# Module-level cache for server-status history. Keyed by period (str) — there
+# Module-level cache for server-status history. Keyed by period (str) - there
 # are only 3 possible keys so this never grows unbounded.
 _server_status_cache: dict[str, tuple[list[tuple[datetime, int]], float]] = {}
 
@@ -424,7 +424,7 @@ async def get_server_status_history(
             raw_ts = data.get("timestamps") or []
             raw_counts = data.get("playerCounts") or []
 
-            # If playerCounts is a single int (not a list), wrap it — the
+            # If playerCounts is a single int (not a list), wrap it - the
             # endpoint sometimes returns a scalar when there's only one data
             # point (observed in the bundle's defensive code).
             if isinstance(raw_counts, (int, float)):

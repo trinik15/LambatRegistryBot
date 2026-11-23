@@ -1,6 +1,6 @@
-"""FactoryMod config client — fetches recipe data from the CivMC/Civ GitHub repo.
+"""FactoryMod config client - fetches recipe data from the CivMC/Civ GitHub repo.
 
-Phase B (WS-6): the ``factorymod.civinfo.net`` website has no API — it's a
+The ``factorymod.civinfo.net`` website has no API - it's a
 static React SPA that fetches ``config.yml`` directly from GitHub and parses
 it client-side. We do the same server-side, caching the parsed config for 1h
 (it only changes on CivMC plugin updates, which are rare).
@@ -24,13 +24,13 @@ FACTORYMOD_CONFIG_URL = (
 )
 
 # Cache the parsed config for 1h. The YAML only changes when CivMC updates
-# their FactoryMod plugin — a rare event. If GitHub is unreachable, we serve
+# their FactoryMod plugin - a rare event. If GitHub is unreachable, we serve
 # stale data (better than failing the /factory command entirely).
 CACHE_TTL = timedelta(hours=1)
 
 # Module-level cache. Stores (parsed_config, fetch_timestamp).
 # Typed as Any to avoid mypy complaints about comparing datetime to the
-# union type — the dict only ever holds these two specific shapes.
+# union type - the dict only ever holds these two specific shapes.
 _cache: dict[str, Any] = {"data": None, "expires": datetime.min.replace(tzinfo=UTC)}
 
 
@@ -85,7 +85,7 @@ async def get_factorymod_config(session: aiohttp.ClientSession) -> dict | None:
         return _cache["data"]
 
     if not isinstance(config, dict) or "factories" not in config:
-        logger.error("FactoryMod config missing 'factories' key — unexpected format.")
+        logger.error("FactoryMod config missing 'factories' key - unexpected format.")
         return _cache["data"]
 
     _cache["data"] = config

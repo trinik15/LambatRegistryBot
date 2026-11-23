@@ -2,19 +2,19 @@
 
 Replaces the old always-200 ``http_keepalive.py``. Three endpoints:
 
-* ``/``        (and any non-matching path) — 200 OK body, keeps hosts like
+* ``/``        (and any non-matching path) - 200 OK body, keeps hosts like
   Render/Railway from marking the bot idle. (Legacy keep-alive behaviour.)
-* ``/healthz`` — honest liveness. Returns 200 **only** when the Discord
+* ``/healthz`` - honest liveness. Returns 200 **only** when the Discord
   gateway is connected and the database pool answers ``SELECT 1``. Returns
   503 otherwise, so a host liveness probe won't be lied to.
-* ``/metrics`` — Prometheus text-format metrics (Phase 1.5). Populated by
+* ``/metrics`` - Prometheus text-format metrics. Populated by
   :func:`core.metrics.collect_metrics` then rendered with ``generate_latest``.
 
 The server runs on a daemon thread and uses ``ThreadingTCPServer`` so a
 slow ``/healthz`` DB ping never blocks the keep-alive responses.
 
 CivMC relevance: leadership and hosting platforms need an honest signal that
-the bot is actually functioning — not just that the process is alive.
+the bot is actually functioning - not just that the process is alive.
 """
 
 import asyncio
@@ -33,7 +33,7 @@ class _BotHealthState:
     """Mutable container holding the references the health handler needs.
 
     Populated by :func:`start_health_server` from the bot instance. The
-    handler thread reads it without locking — these values are write-once
+    handler thread reads it without locking - these values are write-once
     at startup and then read-only, which is safe for our purposes.
     """
 
@@ -71,7 +71,7 @@ def _check_gateway(bot) -> bool:
 def _check_civinfo() -> bool:
     """True if CivInfo auth is NOT in a long-broken state.
 
-    Note: a broken CivInfo key is a *soft* degradation — the bot still serves
+    Note: a broken CivInfo key is a *soft* degradation - the bot still serves
     every command, just with "activity unavailable" instead of fake counts.
     We report it here (and in /metrics) but do NOT fail /healthz on it, since
     a host restarting the bot over a broken third-party key would loop
@@ -82,7 +82,7 @@ def _check_civinfo() -> bool:
 
         return not civinfo_api.is_auth_broken()
     except Exception:
-        # If we can't even import the module, don't guess — treat as ok
+        # If we can't even import the module, don't guess - treat as ok
         # so we don't fail health on an unrelated import error.
         return True
 
@@ -131,7 +131,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
 
         body_lines = [
             "{",
-            f'  "status": "{"ok" if healthy else "degraded"}",',
+            f'  "status": "{"ok" if healthy else "degraded"}',
             f'  "discord_gateway": {str(gateway_ok).lower()},',
             f'  "database": {str(db_ok).lower()},',
             f'  "civinfo_ok": {str(civinfo_ok).lower()},',
@@ -160,7 +160,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
                 except Exception as e:  # noqa: BLE001
                     logger.debug(f"metrics collection error: {e}")
             body, content_type = metrics.render()
-        except Exception as e:  # noqa: BLE001 — never 500 on /metrics
+        except Exception as e:  # noqa: BLE001 - never 500 on /metrics
             logger.error(f"Failed to render metrics: {e}", exc_info=True)
             body = b"# metrics rendering failed\n"
             content_type = "text/plain"
