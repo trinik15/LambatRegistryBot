@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = Config.DATABASE_URL
 _pool: asyncpg.Pool = None
-_pool_lock = asyncio.Lock()  # 🔒 Lock to prevent race conditions during pool creation
+_pool_lock = asyncio.Lock()  # prevents race conditions during pool creation
 
 
 async def get_pool() -> asyncpg.Pool:
@@ -25,8 +25,8 @@ async def get_pool() -> asyncpg.Pool:
                     DATABASE_URL,
                     min_size=2,
                     max_size=10,
-                    command_timeout=10,  # ⏱️ Prevent indefinite hanging queries
-                    max_inactive_connection_lifetime=3600,  # 🗑️ Clean up idle connections
+                    command_timeout=10,  # prevent indefinite hanging queries
+                    max_inactive_connection_lifetime=3600,  # clean up idle connections
                 )
                 logger.info("Database connection pool created successfully.")
     return _pool
@@ -55,7 +55,7 @@ async def init_db():
     """
     pool = await get_pool()
     try:
-        async with pool.acquire() as conn:  # noqa: SIM117 — nested transaction reads cleaner
+        async with pool.acquire() as conn:  # noqa: SIM117 - nested transaction reads cleaner
             async with conn.transaction():
                 # citext extension must exist before any CITEXT column can be
                 # created (fresh installs) or altered into (upgrades).
@@ -90,9 +90,8 @@ async def init_db():
                         status TEXT,
                         is_online BOOLEAN DEFAULT FALSE,
                         last_checked TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                        -- Proposal 1 (CivInfo graceful degradation): TRUE when the
-                        -- row's last_login is stale because CivInfo auth is broken
-                        -- (the daily loop couldn't refresh it). Set en masse by
+                        -- TRUE when the row's last_login is stale because CivInfo auth is
+                        -- broken (the daily loop couldn't refresh it). Set en masse by
                         -- tasks/activity_monitor.mark_all_stale(); cleared to FALSE
                         -- on the next successful fetch (_persist_activities upsert +
                         -- /citizen add). Readers (churn alerts, metrics) skip stale
@@ -119,8 +118,8 @@ async def init_db():
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_citizens_discord ON citizens(discord_id)"
                 )
-                # Phase A (WS-3): indexes on activity_cache for the two common
-                # query patterns — "who is active" (last_login DESC) and "who is
+                # indexes on activity_cache for the two common
+                # query patterns - "who is active" (last_login DESC) and "who is
                 # online right now" (is_online = TRUE, partial index).
                 await conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_activity_cache_last_login "
@@ -131,7 +130,7 @@ async def init_db():
                     "ON activity_cache(is_online) WHERE is_online = TRUE"
                 )
 
-                # --- Phase 2.1: audit_log ---
+                # --- audit_log ---
                 # Append-only ledger of every registry mutation (citizen
                 # add/update/remove, settlement add/remove, role-sync
                 # discrepancies). Queried by /audit search and optionally
@@ -158,7 +157,7 @@ async def init_db():
                     "CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_log(target_ign)"
                 )
 
-                # --- Phase 2.2: recruiters junction table ---
+                # --- recruiters junction table ---
                 # Normalises citizens.recruiter_ids (comma-separated TEXT) into
                 # first-class queryable rows. Back-filled below from the legacy
                 # column. New writes go to BOTH (dual-write) so the legacy
@@ -178,7 +177,7 @@ async def init_db():
                     "ON recruiters(recruiter_discord_id)"
                 )
 
-                # --- Phase 2.4: guild_emojis ---
+                # --- guild_emojis ---
                 # Runtime-configurable emoji mapping, seeded from the hardcoded
                 # Emojis.PROVINCE / Emojis.DISTRICT dicts in core/constants.py.
                 # Decouples reports from one guild's custom emoji IDs so a guild
@@ -191,7 +190,7 @@ async def init_db():
                     )
                 """)
 
-                # --- Phase 2.3: settlements.duchy column ---
+                # --- settlements.duchy column ---
                 # Promotes the hardcoded SETTLEMENT_TO_DUCHY mapping into a DB
                 # column so duchy membership is data, not code. Added as
                 # nullable (safe for existing installs), back-filled from the
@@ -233,14 +232,14 @@ async def init_db():
                         "Migrated citizens.ign and activity_cache.ign to CITEXT (case-insensitive)."
                     )
 
-                # --- Phase A (WS-3, fix B3): activity_cache TIMESTAMPTZ + new columns ---
+                # --- activity_cache TIMESTAMPTZ + new columns ---
                 # last_login + last_checked were plain TIMESTAMP (all other
                 # timestamp columns in the schema are TIMESTAMPTZ). The values
                 # were always UTC (civinfo_api converts epoch-ms with tz=UTC),
-                # so the migration just attaches the timezone marker — no data
+                # so the migration just attaches the timezone marker - no data
                 # shift. Also adds last_logout / first_joined / is_online columns
-                # (new in Phase A) so the mc-accounts/full endpoint data can be
-                # fully persisted. All idempotent — re-running is a no-op.
+                # (new) so the mc-accounts/full endpoint data can be
+                # fully persisted. All idempotent - re-running is a no-op.
                 ac_login_col = await conn.fetchrow(
                     "SELECT data_type FROM information_schema.columns "
                     "WHERE table_name = 'activity_cache' AND column_name = 'last_login'"
@@ -258,7 +257,7 @@ async def init_db():
                     )
                     logger.info("Migrated activity_cache.last_login + last_checked to TIMESTAMPTZ.")
 
-                # Add the new columns if they don't exist (idempotent —
+                # Add the new columns if they don't exist (idempotent -
                 # ADD COLUMN IF NOT EXISTS is safe on Postgres 9.6+).
                 await conn.execute(
                     "ALTER TABLE activity_cache ADD COLUMN IF NOT EXISTS last_logout TIMESTAMPTZ"
@@ -279,21 +278,21 @@ async def init_db():
                     "AND (last_logout IS NULL OR last_login > last_logout)"
                 )
 
-                # --- Phase 4.6: monthly_snapshots.notes ---
+                # --- monthly_snapshots.notes ---
                 # Adds a free-text ``notes`` column so leadership can annotate
                 # historical snapshots with context ("snapshot taken during the
                 # Great Diamond Crisis week", "post-exodus census", etc.). The
                 # monthly report auto-saves rows with notes=NULL; the new
                 # ``/snapshot annotate`` command (cogs/snapshot.py) sets the
-                # value for a given date. Idempotent — re-running is a no-op.
+                # value for a given date. Idempotent - re-running is a no-op.
                 await conn.execute(
                     "ALTER TABLE monthly_snapshots ADD COLUMN IF NOT EXISTS notes TEXT"
                 )
 
-                # --- Proposal 1: activity_cache.stale ---
+                # --- activity_cache.stale ---
                 # Idempotent add for existing installs (fresh installs get it via
                 # the CREATE TABLE above). Marks rows whose last_login couldn't be
-                # refreshed because CivInfo auth was broken — readers skip stale
+                # refreshed because CivInfo auth was broken - readers skip stale
                 # rows so they don't act on aging activity data.
                 await conn.execute(
                     "ALTER TABLE activity_cache ADD COLUMN IF NOT EXISTS stale BOOLEAN DEFAULT FALSE"
@@ -344,7 +343,7 @@ async def init_db():
                         "Migrated settlements.name and citizens.settlement to CITEXT (case-insensitive)."
                     )
 
-                # --- Phase 2.2 back-fill: recruiters junction from recruiter_ids ---
+                # --- back-fill: recruiters junction from recruiter_ids ---
                 # Only inserts rows that don't already exist (ON CONFLICT DO
                 # NOTHING), so it's safe to re-run. recruiter_ids is a comma-
                 # separated list of Discord user IDs. We split on comma and
@@ -379,7 +378,7 @@ async def init_db():
                         f"Back-filled {backfilled_recruiters} recruiter rows from citizens.recruiter_ids."
                     )
 
-                # --- Phase 2.3 back-fill: settlements.duchy from seed dict ---
+                # --- back-fill: settlements.duchy from seed dict ---
                 # Populate duchy for any settlement still NULL. A settlement not
                 # in the seed dict defaults to its own name (it's its own
                 # duchy). After back-fill, enforce NOT NULL so future inserts
@@ -417,7 +416,7 @@ async def init_db():
                         )
                         logger.info("settlements.duchy set to NOT NULL.")
 
-                # --- Phase 3.4: citizen_applications ---
+                # --- citizen_applications ---
                 # Self-service applications submitted via /apply. Council
                 # approves/rejects via button interactions. An approved
                 # application triggers the normal citizen_add path. Status is
@@ -451,7 +450,7 @@ async def init_db():
                     "ON citizen_applications(applicant_discord_id) WHERE status = 'pending'"
                 )
 
-                # --- Phase 3.2: trigram index for fast /citizen search ---
+                # --- trigram index for fast /citizen search ---
                 # pg_trgm enables ILIKE '%query%' to use a GIN index instead of a
                 # full table scan. Essential once the registry grows past a few
                 # hundred citizens. Safe to CREATE IF NOT EXISTS.
@@ -461,7 +460,7 @@ async def init_db():
                     "ON citizens USING GIN (ign gin_trgm_ops)"
                 )
 
-                # --- Phase 2.4 back-fill: seed guild_emojis from constants ---
+                # --- back-fill: seed guild_emojis from constants ---
                 # Inserts the hardcoded emoji mapping into guild_emojis so the
                 # DB-backed lookup has data on first run. ON CONFLICT DO NOTHING
                 # preserves any runtime overrides set via /emoji set.

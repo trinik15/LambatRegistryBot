@@ -1,7 +1,7 @@
-"""Internationalisation (i18n) scaffolding (Phase 4.5).
+"""Internationalisation (i18n) scaffolding.
 
 Extracts user-facing strings into ``locales/{lang}.json`` so the bot can be
-translated without touching Python. Filipino (``fil``) is the stretch goal —
+translated without touching Python. Filipino (``fil``) is the stretch goal -
 Lambat is a Filipino-themed CivMC nation, so a partial Filipino translation of
 ``/help`` and the monthly report resonates with the community.
 
@@ -14,11 +14,11 @@ Usage::
     # With interpolation (named fields in the JSON template):
     msg = tr("report.month_summary", month_name="February 2026", total=42)
 
-Design notes
-------------
+Notes:
+
 * **Lazy load**: locale files are read on first ``tr()`` call (or
   ``available_langs()``) and cached in-process. Reloads only happen if the
-  process restarts — same as every other module-level constant.
+  process restarts - same as every other module-level constant.
 * **Fallback chain**: ``tr(key, lang='fil')`` → look up in ``fil``; if missing,
   fall back to ``en``; if still missing, return the key itself (so missing
   strings are *visible* during development rather than silently empty).
@@ -29,7 +29,7 @@ Design notes
   var (default ``en``). Individual ``tr()`` calls can override per-message if
   a future per-user locale preference is added.
 
-The scaffolding is deliberately minimal — no pluralization rules, no ICU
+The scaffolding is deliberately minimal - no pluralization rules, no ICU
 MessageFormat, no CLDR. For a registry bot with ~100 user-facing strings and a
 single-guild audience, a flat ``key → str.format(**kwargs)`` lookup is the
 right amount of machinery. If Filipino translation ever gets serious, promote
@@ -58,7 +58,7 @@ def _load() -> None:
     """Load every ``locales/*.json`` file into ``_supported``.
 
     Called once on first ``tr()`` / ``available_langs()`` call. Failures to
-    read a single locale are logged but don't abort the load — a broken
+    read a single locale are logged but don't abort the load - a broken
     ``fil.json`` shouldn't take down ``en``.
     """
     global _loaded
@@ -96,7 +96,7 @@ def tr(key: str, lang: str | None = None, **kwargs: Any) -> str:
 
     Args:
         key: dotted-free identifier (e.g. ``"help.title"``). Dots are NOT
-            traversed into nested JSON — the locale file is a flat dict whose
+            traversed into nested JSON - the locale file is a flat dict whose
             keys happen to use dots as a namespace convention.
         lang: override the default ``Config.LOCALE`` for this call. None
             means "use Config.LOCALE" (the normal case).

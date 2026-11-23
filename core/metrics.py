@@ -1,17 +1,17 @@
-"""Prometheus metrics (Phase 1.5).
+"""Prometheus metrics.
 
 All metrics use the default ``prometheus_client`` registry. They are populated
 either:
 
-* continuously — by the code that owns the value (e.g. the CivInfo cache-hit
+* continuously - by the code that owns the value (e.g. the CivInfo cache-hit
   counter is incremented inside ``civinfo_api.CivInfoCache.get``);
-* or on scrape — by :func:`collect_metrics`, which is called from the
+* or on scrape - by :func:`collect_metrics`, which is called from the
   ``/metrics`` HTTP handler and reads the current DB + in-memory state into
   the gauges before ``generate_latest()`` serialises them.
 
 On-scrape collection keeps the gauges honest (no stale in-memory counters for
-citizen counts) at the cost of one cheap DB query per scrape — fine for the
-low-traffic Prometheus poll cadence (15–60s).
+citizen counts) at the cost of one cheap DB query per scrape - fine for the
+low-traffic Prometheus poll cadence (15-60s).
 """
 
 import contextlib
@@ -84,7 +84,7 @@ async def _count_rows(query: str, bot: Any) -> int | None:
         async with pool.acquire() as conn:
             value = await conn.fetchval(query)
             return int(value) if value is not None else None
-    except Exception as e:  # noqa: BLE001 — a metrics scrape must never crash the bot
+    except Exception as e:  # noqa: BLE001 - a metrics scrape must never crash the bot
         logger.debug(f"metrics query failed ({query!r}): {e}")
         return None
 
@@ -137,7 +137,7 @@ async def collect_metrics(bot: Any):
     # Uptime monitor state (if present).
     uptime_monitor = getattr(bot, "uptime_monitor", None)
     if uptime_monitor is not None:
-        with contextlib.suppress(Exception):  # noqa: BLE001 — metrics must never crash
+        with contextlib.suppress(Exception):  # noqa: BLE001 - metrics must never crash
             CIVMC_ONLINE.set(1 if getattr(uptime_monitor, "last_online", True) else 0)
         with contextlib.suppress(Exception):  # noqa: BLE001
             LAST_OUTAGE_DURATION_SECONDS.set(

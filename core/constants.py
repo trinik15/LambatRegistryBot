@@ -2,12 +2,12 @@
 
 
 # ======================
-# Settlement → Duchy seed mapping (Phase 2.3)
+# Settlement → Duchy seed mapping
 # ======================
 # Historical source of truth for which duchy each settlement belongs to. Used
 # ONLY as the migration back-fill seed for the new ``settlements.duchy`` column
 # (and as a fallback if the DB column is somehow NULL). Once the column is
-# populated, the DB is authoritative — this dict must not be read at runtime
+# populated, the DB is authoritative - this dict must not be read at runtime
 # by any code path other than the migration / a defensive fallback.
 SETTLEMENT_TO_DUCHY = {
     "New September": "Lambat City",

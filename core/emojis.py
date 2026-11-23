@@ -1,12 +1,12 @@
-"""DB-backed, runtime-configurable emoji lookup (Phase 2.4).
+"""DB-backed, runtime-configurable emoji lookup.
 
 The hardcoded ``Emojis.PROVINCE`` / ``Emojis.DISTRICT`` dicts in
 ``core/constants.py`` were tied to one Discord guild's custom emoji IDs. This
 module moves the mapping into the ``guild_emojis`` table so it can be changed
 at runtime via ``/emoji set`` without a code change + redeploy.
 
-Lookup path
------------
+How lookups work:
+
 1. An in-process dict cache (``_cache``) is populated lazily on first access
    from the ``guild_emojis`` table.
 2. ``get(key)`` reads from the cache; ``get_province(duchy)`` and
@@ -14,12 +14,12 @@ Lookup path
 3. ``set_emoji(key, emoji_str)`` upserts into the DB and refreshes the cache
    entry in place (so the new value is visible immediately, without a full
    reload).
-4. ``invalidate()`` clears the cache so the next access reloads from the DB —
+4. ``invalidate()`` clears the cache so the next access reloads from the DB -
    used by tests and as a safety hatch.
 
 The cache is per-process, which is correct for this single-process bot. A
 multi-process deployment would need a shared cache (Redis) or a per-request
-DB hit; that's out of scope for Phase 2.
+DB hit; that's out of scope.
 
 Keys use a ``namespace:name`` convention (``province:Lambat City``,
 ``district:New September``) so province and district namespaces never collide.
@@ -58,7 +58,7 @@ async def _ensure_loaded() -> dict[str, str]:
         for row in rows:
             _cache[row["key"]] = row["emoji_str"]
         logger.debug(f"Loaded {len(_cache)} emoji entries from guild_emojis.")
-    except Exception as e:  # noqa: BLE001 — a cache load failure must not crash the bot
+    except Exception as e:  # noqa: BLE001 - a cache load failure must not crash the bot
         logger.error(f"Failed to load guild_emojis cache: {e}", exc_info=True)
         _cache = {}
     return _cache
@@ -77,7 +77,7 @@ async def get(key: str) -> str:
     """Return the emoji string for ``key`` (e.g. ``province:Lambat City``).
 
     Returns ``""`` if the key is not in the DB (no emoji configured). Never
-    raises — a DB failure degrades to empty string so reports still render.
+    raises - a DB failure degrades to empty string so reports still render.
     """
     cache = await _ensure_loaded()
     return cache.get(key, "")

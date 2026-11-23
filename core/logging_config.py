@@ -1,10 +1,10 @@
-"""Structured logging configuration (Phase 1.4).
+"""Structured logging configuration.
 
 Two output modes, selected by ``LOG_FORMAT``:
 
-* ``console`` (default) — human-readable, coloured (when structlog is present)
+* ``console`` (default) - human-readable, coloured (when structlog is present)
   or a plain stdlib format (fallback). Best for local dev + Docker logs.
-* ``json`` — one JSON object per log line, routed through structlog's stdlib
+* ``json`` - one JSON object per log line, routed through structlog's stdlib
   integration so BOTH ``structlog.get_logger()`` calls and legacy
   ``logging.getLogger()`` calls emit the same JSON. Best for log aggregation
   (Loki, Datadog, CloudWatch).
@@ -86,7 +86,7 @@ def _configure_structlog(level: int, log_file: str, json_output: bool):
         file_handler.setFormatter(formatter)
         root.addHandler(file_handler)
     except OSError as e:
-        # If the log file can't be opened (e.g. read-only fs), don't crash —
+        # If the log file can't be opened (e.g. read-only fs), don't crash -
         # stdout is still captured.
         logging.getLogger(__name__).warning(
             f"Could not open log file {log_file!r}: {e}. Logging to stdout only."

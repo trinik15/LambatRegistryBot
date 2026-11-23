@@ -43,22 +43,17 @@ class Config:
     AIOHTTP_TOTAL_TIMEOUT = int(os.getenv("AIOHTTP_TOTAL_TIMEOUT", 5))
     AIOHTTP_CONNECT_TIMEOUT = int(os.getenv("AIOHTTP_CONNECT_TIMEOUT", 3))
 
-    # Phase 4.1: graceful shutdown grace period (seconds). When the container
-    # orchestrator sends SIGTERM, the bot begins an orderly shutdown — cancel
-    # loops, close the HTTP session, close the DB pool, close the gateway. This
-    # value is the HARD ceiling for the whole shutdown sequence: if it's
-    # exceeded, we force-exit so the orchestrator never has to SIGKILL us (a
-    # SIGKILL would lose in-flight log flushes + leave the gateway session
-    # dangling). 15s matches Render's default grace; Docker's default is 10s —
-    # set this a couple seconds BELOW your orchestrator's grace to be safe.
+    # Graceful shutdown grace period (seconds). Hard ceiling for the whole
+    # shutdown sequence: if we exceed it we force-exit rather than let the
+    # orchestrator SIGKILL us (losing log flushes and leaving the gateway
+    # session dangling). 15s matches Render's default grace; Docker's is 10s,
+    # so set this a couple of seconds below whatever your host allows.
     SHUTDOWN_GRACE_SECONDS = int(os.getenv("SHUTDOWN_GRACE_SECONDS", 15))
 
-    # Phase 4.5: default UI language for i18n (core/i18n.tr). ``en`` is the
-    # only fully-translated locale today; ``fil`` is a partial stretch goal
-    # (Lambat is Filipino-themed). Individual tr() calls can override per-
-    # message if a future per-user locale preference is added. The value must
-    # match a file stem in ``locales/`` (without the .json), else tr() falls
-    # back to English.
+    # Default UI language for i18n (core/i18n.tr). ``en`` is the only
+    # fully-translated locale today; ``fil`` is a partial stretch goal
+    # (Lambat is Filipino-themed). Must match a file stem in ``locales/``
+    # (without the .json), else tr() falls back to English.
     LOCALE = os.getenv("LOCALE", "en").strip().lower()
 
     # Cooldown configuration (in seconds)
@@ -70,7 +65,7 @@ class Config:
         os.getenv("COOLDOWN_CRITICAL", 120)
     )  # Very expensive ops (backup, restore)
 
-    # CivInfo API (api.civinfo.net) — player activity + server-status history.
+    # CivInfo API (api.civinfo.net) - player activity + server-status history.
     # The API requires authentication (contact minecraft.gjum@gmail.com for a
     # key). When set, the bot sends it as a Bearer token. When unset or
     # rejected, the bot degrades gracefully instead of silently reporting
@@ -104,26 +99,26 @@ class Config:
     # How often (seconds) to poll the server status. Default 5 min.
     UPTIME_CHECK_INTERVAL = int(os.getenv("UPTIME_CHECK_INTERVAL", 300))
 
-    # --- Audit log (Phase 2.1) ---
+    # --- Audit log ---
     # Channel that receives a concise embed for every registry mutation (citizen
     # add/update/remove, settlement add/remove, role-sync discrepancies). This
     # is a read-only mirror of the audit_log table for the wider council.
     # 0 = disabled (mutations are still recorded in the DB, just not posted).
     AUDIT_CHANNEL_ID = int(os.getenv("AUDIT_CHANNEL_ID", 0))
-    # ROADMAP §6.2 (open decision, now resolved as opt-in): rolling retention for
-    # the audit_log table. 0 = keep forever (the default, matching prior
-    # behaviour — text is cheap). Set e.g. 730 for a 2-year rolling window: a
+    # Rolling retention for the audit_log table. 0 = keep forever (the
+    # default, matching prior behaviour - text is cheap). Set e.g. 730 for
+    # a 2-year rolling window: a
     # nightly task (tasks/audit_retention.py) DELETEs rows older than this many
     # days and emits an audit.prune entry recording how many were removed, so
     # the policy itself is visible in /audit search.
     AUDIT_RETENTION_DAYS = int(os.getenv("AUDIT_RETENTION_DAYS", 0))
 
-    # --- Churn alerts (ROADMAP Phase 5 speculative → implemented) ---
+    # --- Churn alerts ---
     # Weekly task that DMs a citizen's recruiter(s) when the citizen hasn't
     # logged into CivMC for CHURN_THRESHOLD_DAYS. Opt-in because it DMs real
-    # humans — defaults off so a fresh deploy never surprises recruiters.
+    # humans - defaults off so a fresh deploy never surprises recruiters.
     # Reuses activity_cache (last_login) + recruiters junction + audit_log
-    # (cooldown tracking) — no new tables.
+    # (cooldown tracking) - no new tables.
     CHURN_NUDGES_ENABLED = os.getenv("CHURN_NUDGES_ENABLED", "false").strip().lower() in (
         "1",
         "true",
@@ -137,27 +132,27 @@ class Config:
     # them for this many days so a recruiter isn't spammed weekly. Tracked via
     # audit_log (action=churn.nudge, details->>'delivered'='true').
     CHURN_NUDGE_COOLDOWN_DAYS = int(os.getenv("CHURN_NUDGE_COOLDOWN_DAYS", 14))
-    # Weekly slot (default Monday 04:00 UTC — offset from the 02:00 daily_backup
+    # Weekly slot (default Monday 04:00 UTC - offset from the 02:00 daily_backup
     # / daily_check and the 03:30 audit prune so the four nightly jobs don't
     # contend for the asyncpg pool).
     CHURN_NUDGE_WEEKLY_DAY = int(os.getenv("CHURN_NUDGE_WEEKLY_DAY", 0))  # Monday
     CHURN_NUDGE_WEEKLY_HOUR = int(os.getenv("CHURN_NUDGE_WEEKLY_HOUR", 4))  # 04:00 UTC
 
-    # --- Applications channel (Phase 3.4) ---
+    # --- Applications channel ---
     # Channel that receives an embed for every new /apply submission so council
     # can review and approve/reject via the buttons. 0 = disabled (applications
-    # are still recorded in the DB, but no Discord notification is sent —
+    # are still recorded in the DB, but no Discord notification is sent -
     # council must use /application list to see them).
     APPLICATIONS_CHANNEL_ID = int(os.getenv("APPLICATIONS_CHANNEL_ID", 0))
 
-    # --- Governance notifications channel (Phase 3.7) ---
+    # --- Governance notifications channel ---
     # A read-only mirror of registry mutations (citizen add/update/remove,
-    # settlement add/remove) for the WIDER council — a less technical audience
+    # settlement add/remove) for the WIDER council - a less technical audience
     # than the audit channel. If this equals AUDIT_CHANNEL_ID or is 0, no
     # separate governance post is made (the audit channel already covers it).
     GOVERNANCE_CHANNEL_ID = int(os.getenv("GOVERNANCE_CHANNEL_ID", 0))
 
-    # --- Role reconciliation (Phase 2.5) ---
+    # --- Role reconciliation ---
     # Weekly task that checks every citizen's Discord member still holds the
     # citizen/settler/settlement roles and lacks the guest role. Discrepancies
     # are logged to the audit channel (and the audit_log table). When
@@ -176,11 +171,11 @@ class Config:
     # Paths
     BACKUP_DIR = os.getenv("BACKUP_DIR", "backups")
 
-    # --- Backups: off-site sink + retention (Phase 0 hardening) ---
+    # --- Backups: off-site sink + retention ---
     # Where backups are uploaded in addition to the local BACKUP_DIR copy.
     # One of: local, s3, gcs. "local" keeps the legacy behaviour (disk only).
     # S3 requires `pip install boto3` (creds via the standard AWS credential
-    # chain — env vars, profile, or IAM role). GCS requires
+    # chain - env vars, profile, or IAM role). GCS requires
     # `pip install google-cloud-storage` (creds via GOOGLE_APPLICATION_CREDENTIALS).
     BACKUP_SINK = os.getenv("BACKUP_SINK", "local").strip().lower()
     BACKUP_S3_BUCKET = os.getenv("BACKUP_S3_BUCKET", "").strip()
@@ -231,10 +226,9 @@ class Config:
         if cls.AIOHTTP_CONNECT_TIMEOUT >= cls.AIOHTTP_TOTAL_TIMEOUT:
             raise ValueError("AIOHTTP_CONNECT_TIMEOUT must be less than AIOHTTP_TOTAL_TIMEOUT.")
 
-        # Phase 4.1: shutdown grace must be at least 3s — anything less risks
-        # an incomplete close (loops not cancelled, DB pool not released) and
-        # defeats the purpose of graceful shutdown. The container will just
-        # SIGKILL us anyway in that case.
+        # Shutdown grace must be at least 3s - anything less risks an
+        # incomplete close (loops not cancelled, DB pool not released), which
+        # defeats the point of a graceful shutdown in the first place.
         if cls.SHUTDOWN_GRACE_SECONDS < 3:
             raise ValueError("SHUTDOWN_GRACE_SECONDS must be at least 3 seconds.")
 
@@ -280,7 +274,7 @@ class Config:
         if cls.AUDIT_RETENTION_DAYS < 0:
             raise ValueError("AUDIT_RETENTION_DAYS must be >= 0 (0 = keep forever).")
 
-        # Validate churn-alert config (ROADMAP Phase 5 → implemented).
+        # Validate churn-alert config.
         if cls.CHURN_THRESHOLD_DAYS < 1:
             raise ValueError("CHURN_THRESHOLD_DAYS must be at least 1.")
         if cls.CHURN_NUDGE_COOLDOWN_DAYS < 1:
