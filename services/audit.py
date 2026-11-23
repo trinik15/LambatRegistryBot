@@ -1,14 +1,14 @@
-"""Audit log emitter + search (Phase 2.1).
+"""Audit log emitter + search.
 
 Every registry mutation (citizen add/update/remove, settlement add/remove,
 role-sync discrepancy) is recorded in the ``audit_log`` table. The record is
 the authoritative history; an optional Discord channel mirror gives the wider
 council a read-only view.
 
-Design notes
-------------
+Notes:
+
 * **Transaction-aware.** ``emit`` accepts an optional ``connection`` so the
-  audit row is written *inside* the caller's transaction — the mutation and its
+  audit row is written *inside* the caller's transaction - the mutation and its
   audit record commit atomically (or roll back together). When no connection is
   passed, ``emit`` acquires its own. This mirrors ``database.execute_query``'s
   connection-passthrough pattern and is what makes the audit log trustworthy:
@@ -16,7 +16,7 @@ Design notes
 * **JSONB details.** Field-level diffs go into a JSONB column so the full
   history is reconstructable without schema changes. asyncpg doesn't natively
   encode Python dicts to JSONB, so we ``json.dumps`` and cast with ``::jsonb``.
-* **Fire-and-forget channel mirror.``** ``post_to_channel`` is best-effort:
+* **Fire-and-forget channel mirror.** ``post_to_channel`` is best-effort:
   a Discord outage or missing permission must never roll back the mutation
   (the DB record is the source of truth). It is awaited by callers *after* the
   transaction commits.
@@ -49,14 +49,14 @@ ROLE_SYNC_DISCREPANCY = "role_sync.discrepancy"
 ROLE_SYNC_FIXED = "role_sync.fixed"
 EMOJI_SET = "emoji.set"
 SNAPSHOT_ANNOTATE = "snapshot.annotate"
-# Audit retention prune (ROADMAP §6.2). Emitted by tasks/audit_retention.py to
-# record that the nightly prune ran and how many rows it removed — so the
+# Audit retention prune. Emitted by tasks/audit_retention.py to
+# record that the nightly prune ran and how many rows it removed - so the
 # retention policy itself is visible in /audit search.
 AUDIT_PRUNE = "audit.prune"
-# Churn nudge (ROADMAP Phase 5 speculative → implemented). Emitted by
+# Churn nudge. Emitted by
 # tasks/churn_alerts.py when a recruiter is DM'd about an inactive citizen they
 # recruited. ``details`` carries {recruiter, ign, settlement, days_inactive,
-# delivered} — ``delivered=false`` marks a DM that failed (user closed DMs /
+# delivered} - ``delivered=false`` marks a DM that failed (user closed DMs /
 # left the server); the cooldown query filters these out so a failed nudge
 # retries the following week.
 CHURN_NUDGE = "churn.nudge"
@@ -89,7 +89,7 @@ async def emit(
     transaction (atomic with the mutation). Otherwise a fresh connection is
     acquired and the insert runs in its own transaction.
 
-    Failures are logged but never raised — an audit-log write failure must NOT
+    Failures are logged but never raised - an audit-log write failure must NOT
     abort a mutation the user already made (the DB row is the source of truth;
     the audit log is observability). If atomicity is required, the caller must
     pass a connection so the audit insert shares the caller's transaction.
@@ -120,7 +120,7 @@ async def emit(
                 target_ign,
                 details_json,
             )
-    except Exception as e:  # noqa: BLE001 — audit must never break a mutation
+    except Exception as e:  # noqa: BLE001 - audit must never break a mutation
         logger.error(
             f"Failed to emit audit entry (action={action}, target={target_ign}): {e}",
             exc_info=True,
@@ -177,7 +177,7 @@ async def search(
 async def prune_older_than(days: int) -> int:
     """Delete ``audit_log`` rows older than ``days`` days. Returns the count removed.
 
-    Closes ROADMAP §6.2 (open decision: keep audit forever vs rolling retention).
+    Retention is opt-in (AUDIT_RETENTION_DAYS; default = keep forever).
     The caller (tasks/audit_retention.py) is responsible for the no-op-when-
     disabled gate (``AUDIT_RETENTION_DAYS <= 0``); this function still defends
     against ``days <= 0`` by returning 0 without touching the DB, so it's safe
@@ -187,7 +187,7 @@ async def prune_older_than(days: int) -> int:
     server-side in one expression (no Python→SQL timestamp round-trip, no
     clock-skew between app and DB). The ``DELETE`` runs in its own transaction
     (acquired connection); a failure is logged and re-raised so the nightly
-    task's top-level handler surfaces it — unlike ``emit``, a prune failure is
+    task's top-level handler surfaces it - unlike ``emit``, a prune failure is
     NOT silently swallowed because there's no user mutation to protect.
     """
     if days <= 0:
@@ -218,7 +218,7 @@ async def post_to_channel(
 ) -> None:
     """Post a concise audit embed to AUDIT_CHANNEL_ID (best-effort).
 
-    Called by emitters AFTER the DB transaction commits. Never raises — a
+    Called by emitters AFTER the DB transaction commits. Never raises - a
     Discord failure here must not corrupt the caller's flow.
     """
     if not Config.AUDIT_CHANNEL_ID:
@@ -258,12 +258,12 @@ async def post_to_governance_channel(
 ) -> None:
     """Post a governance-style embed to GOVERNANCE_CHANNEL_ID (best-effort).
 
-    Phase 3.7: this is a read-only mirror of registry mutations for the wider
+    A read-only mirror of registry mutations for the wider
     council (a less technical audience than the audit channel). The embed is
     phrased in plain language so non-admins can follow who joined/left/moved.
 
     No-op when GOVERNANCE_CHANNEL_ID is 0 or equals AUDIT_CHANNEL_ID (the audit
-    channel already covers it — avoid double-posting).
+    channel already covers it - avoid double-posting).
     """
     if not Config.GOVERNANCE_CHANNEL_ID:
         return
@@ -328,15 +328,15 @@ def _build_embed(
 ) -> discord.Embed:
     """Build the concise embed posted to the audit channel.
 
-    Intentionally short — the full JSONB diff lives in the DB for /audit search.
+    Intentionally short - the full JSONB diff lives in the DB for /audit search.
     The channel mirror is a glanceable notification, not a data dump.
     """
     color = _action_color(action)
     embed = discord.Embed(title=f"📜 Audit: {_action_label(action)}", color=color)
     embed.timestamp = datetime.now(UTC)
 
-    actor_str = f"<@{actor_discord_id}>" if actor_discord_id else "—"
-    target_str = target_ign or "—"
+    actor_str = f"<@{actor_discord_id}>" if actor_discord_id else "-"
+    target_str = target_ign or "-"
     embed.add_field(name="Actor", value=actor_str, inline=True)
     embed.add_field(name="Target", value=f"`{target_str}`", inline=True)
 
@@ -380,7 +380,7 @@ def _action_color(action: str) -> int:
     if action == ROLE_SYNC_FIXED:
         return 0x57F287  # light green
     if action == CHURN_NUDGE:
-        return 0xF39C12  # amber — "attention: retention nudge"
+        return 0xF39C12  # amber - "attention: retention nudge"
     return 0x7289DA  # default grey-blue
 
 
@@ -437,16 +437,16 @@ def _build_governance_embed(
 ) -> discord.Embed:
     """Build a plain-language embed for the GOVERNANCE_CHANNEL_ID mirror.
 
-    Phase 3.7: the governance channel is for the wider council (non-admins),
+    The governance channel is for the wider council (non-admins),
     so the phrasing is plain English rather than the terse audit format.
     E.g. "🟢 New citizen registered: SteveB joined Lambat City" rather than
-    "📜 Audit: Citizen added — Actor: @user, Target: SteveB".
+    "📜 Audit: Citizen added - Actor: @user, Target: SteveB".
     """
     actor_mention = f"<@{actor_discord_id}>" if actor_discord_id else "Council"
-    target_str = target_ign or "—"
+    target_str = target_ign or "-"
 
     if action == CITIZEN_ADD:
-        settlement = details.get("settlement", "—") if details else "—"
+        settlement = details.get("settlement", "-") if details else "-"
         title = f"🟢 New Citizen: {target_str}"
         desc = f"**{target_str}** has joined the nation as a citizen of **{settlement}**.\nApproved by {actor_mention}."
         color = 0x43B581
@@ -468,18 +468,18 @@ def _build_governance_embed(
         desc = f"**{target_str}** is no longer a registered citizen.\nRemoved by {actor_mention}."
         color = 0xED4245
     elif action == SETTLEMENT_ADD:
-        name = details.get("name", "—") if details else "—"
-        duchy = details.get("duchy", "—") if details else "—"
+        name = details.get("name", "-") if details else "-"
+        duchy = details.get("duchy", "-") if details else "-"
         title = f"🏘️ New Settlement: {name}"
         desc = f"**{name}** ({duchy}) has been added to the registry by {actor_mention}."
         color = 0x43B581
     elif action == SETTLEMENT_REMOVE:
-        name = details.get("name", "—") if details else "—"
+        name = details.get("name", "-") if details else "-"
         title = f"🏚️ Settlement Removed: {name}"
         desc = f"**{name}** has been removed from the registry by {actor_mention}."
         color = 0xED4245
     else:
-        # Role-sync / emoji changes are not governance-relevant — skip them.
+        # Role-sync / emoji changes are not governance-relevant - skip them.
         title = f"📋 {action}"
         desc = f"Action by {actor_mention}."
         color = 0x7289DA

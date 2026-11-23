@@ -1,4 +1,4 @@
-"""Chart rendering for reports — matplotlib (Agg backend) → PNG bytes.
+"""Chart rendering for reports - matplotlib (Agg backend) → PNG bytes.
 
 CivMC relevance: leadership needs to see population growth / decline trends
 over time. The bot already stores ``monthly_snapshots`` but only ever showed
@@ -22,19 +22,19 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Set the Agg backend BEFORE importing pyplot — this must happen at module
+# Set the Agg backend BEFORE importing pyplot - this must happen at module
 # load time so matplotlib never tries to open a display window.
-import matplotlib  # noqa: E402 — must set Agg before importing pyplot
+import matplotlib  # noqa: E402 - must set Agg before importing pyplot
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.dates import DateFormatter  # noqa: E402
 
-# Phase 4.4: explicit font with full Latin + Filipino glyph coverage.
+# Explicit font with full Latin + Filipino glyph coverage.
 # Lambat uses Filipino names ("Mabuhay", "Kahiran ng Lambat") and accented
 # settlement names ("Tierra del Cabo", "Bazariskes", "Florraine"). The default
 # matplotlib font (DejaVu Sans on most installs) actually covers these, but it's
-# only the default by convention — a host with a stripped matplotlib config
+# only the default by convention - a host with a stripped matplotlib config
 # could fall back to a missing-glyph font and render tofu boxes for "ñ"/"ü".
 # Pinning font.family explicitly removes that host-dependent failure mode.
 # DejaVu Sans ships with matplotlib (no system font install needed) and covers
@@ -44,9 +44,9 @@ CHART_FONT_FAMILY = "DejaVu Sans"
 
 # CivMC-ish palette (green = active/growth, red = inactive/decline, blue =
 # neutral totals). Avoids indigo/blue per project styling rules.
-COLOR_TOTAL = "#5865F2"  # discord blurple — for total population
-COLOR_ACTIVE = "#3BAD4C"  # CivMC green — for active citizens
-COLOR_INACTIVE = "#ED4245"  # discord red — for inactive
+COLOR_TOTAL = "#5865F2"  # discord blurple - for total population
+COLOR_ACTIVE = "#3BAD4C"  # CivMC green - for active citizens
+COLOR_INACTIVE = "#ED4245"  # discord red - for inactive
 COLOR_GRID = "#3a3a3a"
 COLOR_TEXT = "#dcddde"
 COLOR_BG = "#36393f"  # discord dark-mode background
@@ -188,7 +188,7 @@ def render_population_trends(
                 color=colors_cycle[idx % len(colors_cycle)],
             )
 
-        ax3.set_title("Top Settlements — Population Growth")
+        ax3.set_title("Top Settlements - Population Growth")
         ax3.set_ylabel("Citizens")
         ax3.set_xlabel("Snapshot Date")
         ax3.xaxis.set_major_formatter(DateFormatter("%b %Y"))
@@ -211,10 +211,10 @@ def render_activity_series(
     totals: list[int],
     actives: list[int] | None = None,
 ) -> bytes | None:
-    """Render a single-panel activity time-series chart (Phase 3.5).
+    """Render a single-panel activity time-series chart.
 
     Args:
-        title: Chart title (e.g. "Florraine — Population & Activity").
+        title: Chart title (e.g. "Florraine - Population & Activity").
         dates: X-axis values (snapshot_date or datetime).
         totals: Total population at each point.
         actives: Optional active citizen count at each point. When provided,
@@ -276,13 +276,13 @@ def render_server_trends(
     data: list[tuple],
     period: str = "day",
 ) -> bytes | None:
-    """Render a single-panel player-count time-series chart (WS-5).
+    """Render a single-panel player-count time-series chart.
 
     Args:
-        title: Chart title (e.g. "CivMC Player Count — Last 24h").
+        title: Chart title (e.g. "CivMC Player Count - Last 24h").
         data: List of (timestamp, player_count) tuples sorted ascending.
             timestamp can be a datetime or epoch float.
-        period: One of "day", "hour", "minute" — controls the x-axis
+        period: One of "day", "hour", "minute" - controls the x-axis
             date formatter and the stats summary (peak/low/avg).
 
     Returns:
@@ -298,7 +298,7 @@ def render_server_trends(
     timestamps = [d[0] for d in data]
     counts = [d[1] for d in data]
 
-    # Player count line — filled area underneath for visibility.
+    # Player count line - filled area underneath for visibility.
     ax.plot(
         timestamps,
         counts,

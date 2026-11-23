@@ -18,11 +18,11 @@ async def rate_limit_guard(
 ):
     """Wait for the Discord gateway rate-limit to clear before a role op.
 
-    Phase 4.3: discord.py's ``is_ws_ratelimited()`` returns True when the
+    discord.py's ``is_ws_ratelimited()`` returns True when the
     gateway has hit a global rate limit (e.g. during a bulk role assignment
     that fires many ``add_roles`` / ``remove_roles`` HTTP calls in quick
     succession). Calling role APIs while the gateway is rate-limited causes
-    discord.py to enqueue the calls — and if the queue grows past Discord's
+    discord.py to enqueue the calls - and if the queue grows past Discord's
     per-route burst, subsequent calls raise ``HTTPException(429)`` which the
     role callers bubble up as a failed citizen add / update / sync.
 
@@ -32,17 +32,17 @@ async def rate_limit_guard(
     so the bot politely waits instead of tripping 429s.
 
     Args:
-        bot: the bot/client (must expose ``is_ws_ratelimited()`` —
+        bot: the bot/client (must expose ``is_ws_ratelimited()`` -
             ``commands.Bot`` / ``discord.Client`` both do).
         max_wait: the longest we'll wait before proceeding anyway (with a
-            warning). 30s default — long enough to clear a typical global
+            warning). 30s default - long enough to clear a typical global
             limit (Discord's are usually 5-10s), short enough that a bulk
             sync of 200 citizens doesn't take an hour.
         poll: how often to re-check. 0.5s balances responsiveness against
             event-loop churn.
 
     Yields:
-        None — the context body runs once the gateway is (probably) clear.
+        None - the context body runs once the gateway is (probably) clear.
     """
     waited = 0.0
     # is_ws_ratelimited is a sync method on discord.Client; guard against
@@ -67,7 +67,7 @@ def _find_role_by_name(guild: discord.Guild, name: str) -> discord.Role | None:
     """Case-insensitive role lookup by name.
 
     Settlement names are CITEXT (case-insensitive) in the DB, so the Discord
-    role lookup must also be case-insensitive — otherwise a settlement added
+    role lookup must also be case-insensitive - otherwise a settlement added
     as "New September" never gets its role assigned if the Discord role is
     "new september" (or vice versa). Returns None if no match.
     """

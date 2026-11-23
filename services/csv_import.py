@@ -1,4 +1,4 @@
-"""CSV bulk import service — Phase 3.1.
+"""CSV bulk import service.
 
 Parses and validates a CSV file of citizens before any DB writes. The dry-run
 preview shows conflicts (duplicate IGN, unknown settlement, bad IGN format);
@@ -182,7 +182,7 @@ def _validate_row(
         if row.settlement not in result.unknown_settlements:
             result.unknown_settlements.append(row.settlement)
 
-    # Join date (optional — if missing, defaults to today on import).
+    # Join date (optional - if missing, defaults to today on import).
     if row.join_date and len(row.join_date) < 8:
         # Basic format check (DD/MM/YYYY); the full validation happens on import.
         row.warnings.append(f"Suspicious join_date format: '{row.join_date}'")

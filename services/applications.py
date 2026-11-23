@@ -1,4 +1,4 @@
-"""Application service — Phase 3.4.
+"""Application service.
 
 Handles the DB operations for self-service citizen applications:
 submitting, listing, approving, and rejecting. The cog (cogs/applications.py)
@@ -30,7 +30,7 @@ async def submit_application(
     """Submit a new application. Returns the created row, or None on conflict.
 
     The partial unique index (uq_applications_pending_per_user) prevents a user
-    from having two pending applications at once — the IntegrityError is caught
+    from having two pending applications at once - the IntegrityError is caught
     and surfaced as None so the cog can show a clear error.
     """
     pool = await db.get_pool()

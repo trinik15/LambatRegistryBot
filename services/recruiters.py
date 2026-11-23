@@ -1,4 +1,4 @@
-"""Recruiters junction-table operations (Phase 2.2).
+"""Recruiters junction-table operations.
 
 The ``recruiters`` table normalises the legacy ``citizens.recruiter_ids``
 comma-separated TEXT column into first-class queryable rows. This module is
@@ -25,7 +25,7 @@ def _clean_recruiter_ids(recruiter_ids: list[str]) -> list[str]:
 
     Strips whitespace, drops empty/non-numeric entries, and preserves the
     first-seen order. Exposed as a module-level function so it's unit-testable
-    without a DB — the cleaning logic is the most regression-prone part
+    without a DB - the cleaning logic is the most regression-prone part
     (a bad ID here would corrupt the junction table).
     """
     seen: set[str] = set()
