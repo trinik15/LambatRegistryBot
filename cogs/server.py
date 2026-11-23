@@ -1,4 +1,4 @@
-"""Server status cog — live CivMC server health via mcsrvstat.us (no auth).
+"""Server status cog - live CivMC server health via mcsrvstat.us (no auth).
 
 CivMC relevance: nations need to know if the server is up before scheduling
 events, raids, or pearl defenses. The mcsrvstat.us API is free, requires no
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class ServerCog(commands.Cog):
-    """``/server status`` — live CivMC server health."""
+    """``/server status`` - live CivMC server health."""
 
     server_group = app_commands.Group(name="server", description="CivMC server status and uptime")
 
@@ -53,7 +53,7 @@ class ServerCog(commands.Cog):
             "online": bool(data.get("online")),
             "players_online": players.get("online", 0),
             "players_max": players.get("max", 0),
-            "players_list": players.get("list") or [],  # Phase 3.8: list of online IGNs
+            "players_list": players.get("list") or [],  # online IGNs (may be missing)
             "version": data.get("version", "unknown"),
             "motd": " | ".join(motd_lines).strip() if motd_lines else "",
             "icon": data.get("icon"),  # base64 data URI, or None
@@ -130,7 +130,7 @@ class ServerCog(commands.Cog):
     @app_commands.checks.cooldown(1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "server_ping"))
     async def server_ping(self, interaction: discord.Interaction):
         """Lightweight one-line status."""
-        # Defer in case the status API is slow — avoids Discord's 3-second
+        # Defer in case the status API is slow - avoids Discord's 3-second
         # interaction timeout. The followup is still public (not ephemeral).
         await interaction.response.defer()
         try:
@@ -138,13 +138,13 @@ class ServerCog(commands.Cog):
         except Exception as e:
             logger.error(f"Server ping failed: {e}", exc_info=True)
             await interaction.followup.send(
-                "🔴 **CivMC** — status API unreachable right now.", ephemeral=True
+                "🔴 **CivMC** - status API unreachable right now.", ephemeral=True
             )
             return
 
         if s["online"]:
             await interaction.followup.send(
-                f"🟢 **CivMC** is online — {s['players_online']}/{s['players_max']} players "
+                f"🟢 **CivMC** is online - {s['players_online']}/{s['players_max']} players "
                 f"(v{s['version']})"
             )
         else:
@@ -157,7 +157,7 @@ class ServerCog(commands.Cog):
         1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "server_online")
     )
     async def server_online(self, interaction: discord.Interaction):
-        """Phase 3.8: cross-reference online CivMC players with the registry."""
+        """Cross-reference online CivMC players with the registry."""
         await interaction.response.defer()
 
         try:
@@ -226,9 +226,9 @@ class ServerCog(commands.Cog):
         interaction: discord.Interaction,
         period: app_commands.Choice[str] | None = None,
     ):
-        """Phase B (WS-5): historical player-count sparkline via CivInfo mc-server-status.
+        """Historical player-count sparkline via CivInfo mc-server-status.
 
-        Different from /server status (live, via mcsrvstat.us) — this shows
+        Different from /server status (live, via mcsrvstat.us) - this shows
         trends over time, so leadership can see when CivMC is busy.
         """
         await interaction.response.defer()
@@ -245,7 +245,7 @@ class ServerCog(commands.Cog):
                 title="📈 CivMC Player Count Trends",
                 description=(
                     "⚠️ **Activity data unavailable**\n"
-                    "CivInfo API auth required — contact an admin.\n"
+                    "CivInfo API auth required - contact an admin.\n"
                     "_(Set `CIVINFO_API_KEY` to enable trends.)_"
                 ),
                 color=0xED4245,
@@ -273,7 +273,7 @@ class ServerCog(commands.Cog):
 
         from services import charts
 
-        title = f"CivMC Player Count — {period_label}"
+        title = f"CivMC Player Count - {period_label}"
         png_bytes = await asyncio.get_event_loop().run_in_executor(
             None, charts.render_server_trends, title, history, period_val
         )
@@ -295,7 +295,7 @@ class ServerCog(commands.Cog):
 
         embed = discord.Embed(
             title="📈 CivMC Player Count Trends",
-            description=f"**{period_label}** — {len(history)} data points",
+            description=f"**{period_label}** - {len(history)} data points",
             color=0x3BAD4C,
         )
         embed.add_field(name="Peak", value=f"👥 {peak}", inline=True)
@@ -356,12 +356,12 @@ def _build_online_embed(
 
     embed = discord.Embed(
         title="🟢 CivMC Online Players",
-        description=f"**{total_online}/{players_max}** players online — **{lambat_count}** Lambat citizen(s).",
+        description=f"**{total_online}/{players_max}** players online - **{lambat_count}** Lambat citizen(s).",
         color=0x3BAD4C,
     )
 
     if citizens_online:
-        lines = [f"• **{ign}** — {settlement}" for ign, settlement in citizens_online[:25]]
+        lines = [f"• **{ign}** - {settlement}" for ign, settlement in citizens_online[:25]]
         value = "\n".join(lines)
         if len(citizens_online) > 25:
             value += f"\n*...and {len(citizens_online) - 25} more*"

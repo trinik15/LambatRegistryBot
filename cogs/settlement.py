@@ -27,7 +27,7 @@ class SettlementCog(commands.Cog):
     def has_full_access(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == Config.OWNER_ID:
             return True
-        # DM context: interaction.user has no .roles — deny rather than crash.
+        # DM context: interaction.user has no .roles - deny rather than crash.
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return False
         user_role_ids = [r.id for r in interaction.user.roles]
@@ -72,7 +72,7 @@ class SettlementCog(commands.Cog):
 
         if len(name) > Limits.SETTLEMENT_NAME_MAX or len(name) < 2:
             await interaction.response.send_message(
-                f"❌ Settlement name must be 2–{Limits.SETTLEMENT_NAME_MAX} characters.",
+                f"❌ Settlement name must be 2-{Limits.SETTLEMENT_NAME_MAX} characters.",
                 ephemeral=True,
             )
             return
@@ -96,7 +96,7 @@ class SettlementCog(commands.Cog):
             await conn.execute(
                 "INSERT INTO settlements (name, duchy) VALUES ($1, $2)", name, duchy.strip()
             )
-            # Phase 2.1: audit the add atomically.
+            # audit the add atomically.
             await audit.emit(
                 audit.SETTLEMENT_ADD,
                 interaction.user.id,
@@ -107,7 +107,7 @@ class SettlementCog(commands.Cog):
 
         self.invalidate_cache()
 
-        # Phase 2.1: mirror to the audit channel.
+        # mirror to the audit channel.
         await audit.post_to_channel(
             self.bot,
             audit.SETTLEMENT_ADD,
@@ -115,7 +115,7 @@ class SettlementCog(commands.Cog):
             None,
             {"name": name, "duchy": duchy.strip()},
         )
-        # Phase 3.7: also mirror to the governance channel (wider council).
+        # also mirror to the governance channel (wider council).
         await audit.post_to_governance_channel(
             self.bot,
             audit.SETTLEMENT_ADD,
@@ -172,7 +172,7 @@ class SettlementCog(commands.Cog):
         pool = await db.get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute("DELETE FROM settlements WHERE name = $1", name)
-            # Phase 2.1: audit the removal atomically.
+            # audit the removal atomically.
             await audit.emit(
                 audit.SETTLEMENT_REMOVE,
                 interaction.user.id,
@@ -183,7 +183,7 @@ class SettlementCog(commands.Cog):
 
         self.invalidate_cache()
 
-        # Phase 2.1: mirror to the audit channel.
+        # mirror to the audit channel.
         await audit.post_to_channel(
             self.bot,
             audit.SETTLEMENT_REMOVE,
@@ -191,7 +191,7 @@ class SettlementCog(commands.Cog):
             None,
             {"name": name, "duchy": duchy},
         )
-        # Phase 3.7: also mirror to the governance channel (wider council).
+        # also mirror to the governance channel (wider council).
         await audit.post_to_governance_channel(
             self.bot,
             audit.SETTLEMENT_REMOVE,
@@ -212,7 +212,7 @@ class SettlementCog(commands.Cog):
         1, Config.COOLDOWN_FAST, key=lambda i: (i.user.id, "settlement_list")
     )
     async def settlement_list(self, interaction: discord.Interaction):
-        # Phase 2.3: read duchy from the DB (no longer from the hardcoded dict).
+        # read duchy from the DB (no longer from the hardcoded dict).
         rows = await db.execute_query(
             "SELECT name, duchy FROM settlements ORDER BY duchy, name", fetch_all=True
         )
@@ -234,7 +234,7 @@ class SettlementCog(commands.Cog):
             color=0x7289DA,
         )
         for duchy, settlements in sorted(by_duchy.items()):
-            # Phase 2.4: look up the duchy emoji from the DB-backed mapping.
+            # look up the duchy emoji from the DB-backed mapping.
             emoji = await emoji_db.get_province(duchy)
             header = f"{emoji} {duchy}".strip() if emoji else duchy
             value = "\n".join(f"• {s}" for s in settlements)
@@ -251,7 +251,7 @@ class SettlementCog(commands.Cog):
         1, Config.COOLDOWN_MEDIUM, key=lambda i: (i.user.id, "settlement_info")
     )
     async def settlement_info(self, interaction: discord.Interaction, name: str):
-        """Phase 3.3: single-settlement dashboard embed.
+        """Single-settlement dashboard embed.
 
         Shows total citizens, activity breakdown, growth since last snapshot,
         top recruiters, and a paginated member list.
@@ -320,7 +320,7 @@ class SettlementCog(commands.Cog):
         header = f"{emoji} {name}".strip() if emoji else name
 
         embed = discord.Embed(
-            title=f"🏘️ {header} — Settlement Dashboard",
+            title=f"🏘️ {header} - Settlement Dashboard",
             description=f"Duchy: **{duchy_name}**",
             color=0x7289DA,
         )
@@ -351,7 +351,7 @@ class SettlementCog(commands.Cog):
             lines = []
             for idx, row in enumerate(top_recruiters, start=1):
                 medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(idx, f"{idx}.")
-                lines.append(f"{medal} <@{row['recruiter_discord_id']}> — **{row['cnt']}**")
+                lines.append(f"{medal} <@{row['recruiter_discord_id']}> - **{row['cnt']}**")
             embed.add_field(name="Top Recruiters", value="\n".join(lines)[:1024], inline=True)
 
         # Member list (first 20, paginated if more).
@@ -359,7 +359,7 @@ class SettlementCog(commands.Cog):
             member_lines = [f"• {c['ign']}" for c in citizens[:20]]
             member_value = "\n".join(member_lines)
             if total > 20:
-                member_value += f"\n*...and {total - 20} more — use /citizen list*"
+                member_value += f"\n*...and {total - 20} more - use /citizen list*"
             embed.add_field(
                 name=f"Members ({total})",
                 value=member_value[:1024],
