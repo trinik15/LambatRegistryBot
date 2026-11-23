@@ -23,7 +23,7 @@ USER botuser
 # Render/Railway/etc. provide PORT via env. The HTTP keep-alive server reads it.
 ENV PORT=10000
 
-# Phase 4.2: HEALTHCHECK probes the real /healthz endpoint (Phase 0.3), which
+# HEALTHCHECK probes the real /healthz endpoint, which
 # returns 200 ONLY when the Discord gateway is connected AND the DB pool is
 # live. This is honest — a container that loses its DB connection or Discord
 # gateway will be marked unhealthy and restarted by the orchestrator, instead

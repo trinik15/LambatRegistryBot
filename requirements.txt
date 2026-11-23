@@ -9,10 +9,10 @@ aiohttp==3.14.3
 discord.py==2.7.1
 asyncpg==0.31.0
 matplotlib==3.11.1
-# Phase 1: structured logging + Prometheus metrics are now used at startup
+# structured logging + Prometheus metrics are used at startup
 # (core/logging_config.py, core/metrics.py) and are therefore runtime deps.
 structlog==26.1.0
 prometheus-client==0.26.0
-# Phase B (WS-6): YAML parser for the FactoryMod config fetched from GitHub.
+# YAML parser for the FactoryMod config fetched from GitHub.
 # Used by /factory commands to parse the CivMC/Civ config.yml (482 KB, cached 1h).
 pyyaml==6.0.3

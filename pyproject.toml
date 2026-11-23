@@ -18,12 +18,12 @@ dependencies = [
     "discord-py>=2.6.4",
     "asyncpg>=0.29.0",
     "matplotlib>=3.7.0",
-    # Phase 1 additions — these are now runtime deps (used by core/logging_config
+    # these are now runtime deps (used by core/logging_config
     # and core/metrics, both imported at startup). Keep optional cloud SDKs out
     # of the base install; they're pulled in only when BACKUP_SINK needs them.
     "structlog>=24.1.0",
     "prometheus-client>=0.20.0",
-    # Phase B (WS-6): YAML parser for the FactoryMod config fetched from GitHub.
+    # YAML parser for the FactoryMod config fetched from GitHub.
     # Used by /factory commands to parse the CivMC/Civ config.yml (cached 1h).
     "pyyaml>=6.0",
 ]
@@ -78,11 +78,11 @@ indent-style = "space"
 # -----------------------------------------------------------------------------
 # Mypy — static type checking.
 #
-# Baseline policy (Phase 1): a GREEN, useful CI gate. We check untyped function
+# Baseline policy: a GREEN, useful CI gate. We check untyped function
 # bodies (check_untyped_defs) and flag returning Any, but we do NOT yet require
 # every function to be typed (disallow_untyped_defs=false) — the existing
-# codebase predates this policy. Tightening to strict on core/ and services/
-# is the Phase 2 aspiration once their signatures get annotated.
+# codebase predates this policy. We'll tighten to strict once core/ and
+# services/ signatures are annotated.
 # -----------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
@@ -90,10 +90,10 @@ ignore_missing_imports = true
 check_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-# warn_return_any is intentionally OFF for the Phase 1 baseline: asyncpg's
+# warn_return_any is intentionally OFF for now: asyncpg's
 # fetchval/fetchrow and discord.py's attribute access return Any, which would
-# cascade through the existing (untyped) codebase. Turn this on in Phase 2
-# once core/services signatures are annotated.
+# cascade through the existing (untyped) codebase. Turn this on once
+# core/services signatures are annotated.
 warn_return_any = false
 no_implicit_optional = true
 show_error_codes = true
