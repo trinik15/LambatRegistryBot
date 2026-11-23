@@ -78,7 +78,7 @@ class CitizenRemoveConfirm(discord.ui.View):
             await conn.execute("DELETE FROM citizens WHERE ign = $1", self.ign)
             await conn.execute("DELETE FROM activity_cache WHERE ign = $1", self.ign)
             # recruiters junction cascades on delete, no manual cleanup needed.
-            # Phase 2.1: audit the removal atomically with the delete.
+            # audit the removal atomically with the delete.
             await audit.emit(
                 audit.CITIZEN_REMOVE,
                 interaction.user.id,
@@ -87,7 +87,7 @@ class CitizenRemoveConfirm(discord.ui.View):
                 connection=conn,
             )
 
-        # Phase 2.1: mirror to the audit channel (best-effort, post-commit).
+        # mirror to the audit channel (best-effort, post-commit).
         await audit.post_to_channel(
             interaction.client,
             audit.CITIZEN_REMOVE,
@@ -95,7 +95,7 @@ class CitizenRemoveConfirm(discord.ui.View):
             self.ign,
             {"discord_id": self.discord_id, "settlement": self.settlement},
         )
-        # Phase 3.7: also mirror to the governance channel (wider council).
+        # also mirror to the governance channel (wider council).
         await audit.post_to_governance_channel(
             interaction.client,
             audit.CITIZEN_REMOVE,
@@ -162,7 +162,7 @@ class CitizenCog(commands.Cog):
         if interaction.user.id == Config.OWNER_ID:
             return True
         # DM context: interaction.user is a User, not a Member, so it has no
-        # .roles — deny rather than crash with AttributeError.
+        # .roles - deny rather than crash with AttributeError.
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return False
         user_role_ids = [r.id for r in interaction.user.roles]
@@ -207,7 +207,7 @@ class CitizenCog(commands.Cog):
         # Validate IGN format (Minecraft username rules: 3-16 chars, [A-Za-z0-9_])
         if not _IGN_PATTERN.match(ign) or not (3 <= len(ign) <= Limits.IGN_MAX_LENGTH):
             await interaction.response.send_message(
-                "❌ IGN must be 3–16 characters and may only contain letters, numbers, and underscores.",
+                "❌ IGN must be 3-16 characters and may only contain letters, numbers, and underscores.",
                 ephemeral=True,
             )
             return
@@ -246,7 +246,7 @@ class CitizenCog(commands.Cog):
         join_date_display = join_date_obj.strftime("%d/%m/%Y")
 
         pool = await db.get_pool()
-        async with pool.acquire() as conn:  # noqa: SIM117 — nested transaction reads cleaner
+        async with pool.acquire() as conn:  # noqa: SIM117 - nested transaction reads cleaner
             async with conn.transaction():
                 existing_ign = await conn.fetchrow(
                     "SELECT discord_id, ign FROM citizens WHERE ign = $1", ign
@@ -282,7 +282,7 @@ class CitizenCog(commands.Cog):
 
                 # CivInfo lookup validates that the IGN actually exists on CivMC
                 # and seeds the activity cache. We only HARD-block on
-                # "not_found" (the IGN doesn't exist — likely a typo). If the
+                # "not_found" (the IGN doesn't exist - likely a typo). If the
                 # API itself is down or auth-broken ("error"), we still
                 # register the citizen (the registry is the source of truth,
                 # not CivInfo) and surface a warning so council knows the
@@ -311,8 +311,8 @@ class CitizenCog(commands.Cog):
                     join_date_obj,
                 )
 
-                # Phase 2.2: dual-write recruiters into the junction table
-                # (source of truth). recruiter_ids stays as a denormalised cache.
+                # dual-write recruiters into the junction table (source of truth);
+                # recruiter_ids stays as a denormalised cache.
                 await recruiters_svc.set_recruiters(ign, recruiters, connection=conn)
 
                 if pa.last_login:
@@ -336,9 +336,8 @@ class CitizenCog(commands.Cog):
                         pa.is_online,
                     )
 
-                # Phase 2.1: audit the add inside the transaction so it's
-                # atomic — either the citizen + audit row commit together,
-                # or neither does.
+                # audit the add inside the transaction so it's atomic - either the
+                # citizen + audit row commit together, or neither does.
                 await audit.emit(
                     audit.CITIZEN_ADD,
                     interaction.user.id,
@@ -354,7 +353,7 @@ class CitizenCog(commands.Cog):
 
         # Role assignment happens after the DB commit (the registry is the
         # source of truth). If Discord role assignment fails we must NOT claim
-        # full success — surface the partial failure honestly so council can fix it.
+        # full success - surface the partial failure honestly so council can fix it.
         role_error = None
         try:
             await role_manager.assign_citizen_roles(discord_user, settlement)
@@ -367,7 +366,7 @@ class CitizenCog(commands.Cog):
         self.autocomplete_cache.invalidate_citizen_cache()
         self.autocomplete_cache.invalidate_settlement_cache()
 
-        # Phase 2.1: mirror the audit event to the (optional) audit channel.
+        # mirror the audit event to the (optional) audit channel.
         # Best-effort: a Discord failure here must not corrupt the success path.
         await audit.post_to_channel(
             self.bot,
@@ -380,7 +379,7 @@ class CitizenCog(commands.Cog):
                 "recruiters": recruiters,
             },
         )
-        # Phase 3.7: also mirror to the governance channel (wider council).
+        # also mirror to the governance channel (wider council).
         await audit.post_to_governance_channel(
             self.bot,
             audit.CITIZEN_ADD,
@@ -622,10 +621,10 @@ class CitizenCog(commands.Cog):
         pool = await db.get_pool()
         async with pool.acquire() as conn, conn.transaction():
             await conn.execute(query, *params)
-            # Phase 2.2: sync the recruiters junction table if recruiters changed.
+            # sync the recruiters junction table if recruiters changed.
             if new_recruiters_list is not None:
                 await recruiters_svc.set_recruiters(ign, new_recruiters_list, connection=conn)
-            # Phase 2.1: audit the update inside the transaction (atomic).
+            # audit the update inside the transaction (atomic).
             # Serialise the changes dict (tuples → lists) for JSONB.
             audit_changes = {k: list(v) for k, v in changes.items()}
             await audit.emit(
@@ -636,12 +635,12 @@ class CitizenCog(commands.Cog):
                 connection=conn,
             )
 
-        # Phase A (WS-3, fix B4): use the public invalidate() method instead
-        # of reaching into the cache's internal dict.
+        # use the public invalidate() method instead of reaching into the
+        # cache's internal dict.
         civinfo_api.cache.invalidate(ign)
         self.autocomplete_cache.invalidate_citizen_cache()
 
-        # Phase 2.1: mirror to the audit channel (best-effort, post-commit).
+        # mirror to the audit channel (best-effort, post-commit).
         await audit.post_to_channel(
             self.bot,
             audit.CITIZEN_UPDATE,
@@ -649,7 +648,7 @@ class CitizenCog(commands.Cog):
             ign,
             {"changes": {k: list(v) for k, v in changes.items()}},
         )
-        # Phase 3.7: also mirror to the governance channel (wider council).
+        # also mirror to the governance channel (wider council).
         await audit.post_to_governance_channel(
             self.bot,
             audit.CITIZEN_UPDATE,
@@ -668,7 +667,7 @@ class CitizenCog(commands.Cog):
                 if old_member:
                     await role_manager.remove_all_citizen_roles(old_member, old_settlement)
                 # If only the Discord user changed (not the settlement), the
-                # new user must still receive their EXISTING settlement role —
+                # new user must still receive their EXISTING settlement role -
                 # `settlement` is None in that case, so fall back to old_settlement.
                 effective_settlement = settlement if change_settlement else old_settlement
                 await role_manager.assign_citizen_roles(discord_user, effective_settlement)
@@ -864,7 +863,7 @@ class CitizenCog(commands.Cog):
 
         await interaction.response.defer()
 
-        # Read from the recruiters junction table (Phase 2.2 source of truth).
+        # Read from the recruiters junction table (source of truth).
         recruited = await recruiters_svc.get_recruited_by(str(recruiter.id))
         if not recruited:
             await interaction.followup.send(
@@ -881,8 +880,8 @@ class CitizenCog(commands.Cog):
         lines = []
         for r in recruited:
             ts = r["recruited_at"]
-            date_str = utils.format_date(ts, "%Y-%m-%d") if ts else "—"
-            lines.append(f"• **{r['ign']}** — {date_str}")
+            date_str = utils.format_date(ts, "%Y-%m-%d") if ts else "-"
+            lines.append(f"• **{r['ign']}** - {date_str}")
         # Chunk into fields of ~30 lines to stay under the 1024-char limit.
         value = "\n".join(lines)
         if len(value) > 1020:
@@ -901,7 +900,7 @@ class CitizenCog(commands.Cog):
         query="Search term (IGN, settlement name, or Discord user ID)",
     )
     async def citizen_search(self, interaction: discord.Interaction, query: str):
-        """Phase 3.2: full-text-ish search across the registry.
+        """Full-text-ish search across the registry.
 
         Searches IGN (ILIKE, trigram-indexed), settlement name, and Discord ID.
         Results are paginated via PaginationView.
@@ -938,7 +937,7 @@ class CitizenCog(commands.Cog):
         file="CSV file with columns: IGN, Discord ID, Settlement, Join Date, Address, Mailbox, Recruiter IDs, Notes"
     )
     async def citizen_import(self, interaction: discord.Interaction, file: discord.Attachment):
-        """Phase 3.1: bulk CSV import with dry-run preview + confirm button."""
+        """Bulk CSV import with dry-run preview + confirm button."""
         if not self.has_full_access(interaction):
             return await interaction.response.send_message(
                 "❌ You need the Council role to use this command.", ephemeral=True
@@ -988,7 +987,7 @@ class CitizenCog(commands.Cog):
 
 
 class ConfirmImportView(discord.ui.View):
-    """Confirm/Cancel buttons for the CSV import dry-run (Phase 3.1)."""
+    """Confirm/Cancel buttons for the CSV import dry-run."""
 
     def __init__(self, result, user: discord.User | discord.Member):
         super().__init__(timeout=300)
@@ -1053,7 +1052,7 @@ class ConfirmImportView(discord.ui.View):
 
 
 async def _import_single_citizen(row) -> None:
-    """Import a single validated CSV row into the DB (Phase 3.1)."""
+    """Import a single validated CSV row into the DB."""
     from services import recruiters as recruiters_svc
     from utils import parse_join_date
 
@@ -1091,7 +1090,7 @@ def _build_import_preview_embed(result) -> discord.Embed:
     embed = discord.Embed(
         title="📋 CSV Import Preview (Dry Run)",
         description=(
-            f"**{result.total}** rows parsed — "
+            f"**{result.total}** rows parsed - "
             f"✅ **{result.valid_count}** valid, "
             f"❌ **{result.invalid_count}** invalid."
         ),
@@ -1112,7 +1111,7 @@ def _build_import_preview_embed(result) -> discord.Embed:
     if valid_rows:
         lines = []
         for row in valid_rows[:10]:
-            lines.append(f"• **{row.ign}** — {row.settlement}")
+            lines.append(f"• **{row.ign}** - {row.settlement}")
         if len(valid_rows) > 10:
             lines.append(f"*...and {len(valid_rows) - 10} more valid rows*")
         embed.add_field(name="✅ Valid Rows (preview)", value="\n".join(lines)[:1024], inline=False)
@@ -1138,20 +1137,20 @@ async def _search_citizens(query: str) -> list[dict]:
     """Search citizens by IGN, settlement, or Discord ID.
 
     Uses ILIKE for partial case-insensitive matching (the trigram index
-    added in Phase 3.2 makes this fast). When the query looks like a Discord
+    makes this fast). When the query looks like a Discord
     ID (all digits), also matches discord_id and recruiter_discord_id.
 
     .. note::
 
         The Discord-ID path queries **our own** ``citizens.discord_id``
         column (populated at ``/citizen add`` time), NOT CivInfo. CivInfo's
-        ``mc-accounts/full`` endpoint does not expose Discord UIDs — the
+        ``mc-accounts/full`` endpoint does not expose Discord UIDs - the
         Discord↔MC link lives in Gjum's Kira bridge (``users`` table), which
         is not exposed via any civinfo API endpoint (confirmed 2025-08 via
         ``civmc.netlify.app`` bundle analysis + ``Gjum/Kira`` source; see
         ``ROADMAP.md`` §8.1 and ``README.md`` "Why can't we look up
         citizens by Discord UID?"). Don't try to resolve an unknown Discord
-        ID via CivInfo — it can't be done. This path only finds citizens
+        ID via CivInfo - it can't be done. This path only finds citizens
         already registered with us.
     """
     pattern = f"%{query}%"
@@ -1199,9 +1198,9 @@ def _build_search_results_embeds(query: str, rows: list[dict]) -> list[discord.E
         )
         lines = []
         for row in chunk:
-            join_str = utils.format_date(row["join_date"]) if row["join_date"] else "—"
+            join_str = utils.format_date(row["join_date"]) if row["join_date"] else "-"
             lines.append(
-                f"• **{row['ign']}** — {row['settlement']} "
+                f"• **{row['ign']}** - {row['settlement']} "
                 f"(<@{row['discord_id']}>, joined {join_str})"
             )
         embed.add_field(
