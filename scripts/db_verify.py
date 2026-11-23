@@ -3,9 +3,9 @@
 
 Connects to the registry database (DATABASE_URL) and verifies:
 
-  1. Every expected table exists (Phase 0 -> Phase 4 schema).
-  2. The pg_trgm extension is installed (Phase 3.2 trigram search index).
-  3. The Phase 4.6 ``monthly_snapshots.notes`` column exists.
+  1. Every expected table exists.
+  2. The pg_trgm extension is installed (trigram search index).
+  3. The ``monthly_snapshots.notes`` column exists.
   4. If ``scripts/seed.py`` has been run, the 5 seed settlements + 6 seed
      citizens are present (and the recruiters junction was back-filled).
 
@@ -17,7 +17,7 @@ Exits 0 if every check passes, 1 if any fail. Designed to be called by
 ``scripts/run_e2e.ps1`` (stage S11) but also works standalone:
 
     python scripts/db_verify.py
-    DATABASE_URL=postgresql://lambat:lambat_dev_password@localhost:5432/lambat \\
+    DATABASE_URL=postgresql://lambat:lambat_dev_password@localhost:5432/lambat \
         python scripts/db_verify.py --json
 """
 
@@ -43,14 +43,14 @@ from scripts._env_loader import load_env_file  # noqa: E402
 # core/database.py. If a migration is added, append it here AND in db_verify's
 # checks so the E2E harness catches a missed migration immediately.
 EXPECTED_TABLES: dict[str, str] = {
-    "settlements": "Phase 0 core table",
-    "citizens": "Phase 0 core table",
-    "activity_cache": "Phase 0 CivInfo cache",
-    "monthly_snapshots": "Phase 0 census snapshots",
-    "audit_log": "Phase 2.1 auditability",
-    "recruiters": "Phase 2.2 normalised junction",
-    "guild_emojis": "Phase 2.4 DB-backed emoji map",
-    "citizen_applications": "Phase 3.4 self-service /apply",
+    "settlements": "core table",
+    "citizens": "core table",
+    "activity_cache": "CivInfo cache",
+    "monthly_snapshots": "census snapshots",
+    "audit_log": "audit trail",
+    "recruiters": "normalised junction",
+    "guild_emojis": "DB-backed emoji map",
+    "citizen_applications": "self-service /apply",
 }
 
 # Seed data that scripts/seed.py inserts. Verified ONLY when --check-seed is on
@@ -129,15 +129,15 @@ async def _verify(db_url: str, check_seed: bool) -> dict[str, object]:
         print(f"\n{BOLD}2. Extensions{RESET}")
         ext_row = await conn.fetchval("SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'")
         if ext_row == "pg_trgm":
-            print(f"{_PASS}pg_trgm installed (Phase 3.2 trigram search)")
+            print(f"{_PASS}pg_trgm installed (trigram search)")
             result["extensions"]["pg_trgm"] = True  # type: ignore[index]
         else:
             print(f"{_FAIL}pg_trgm NOT installed (citizen search will be slow/wrong)")
             result["extensions"]["pg_trgm"] = False  # type: ignore[index]
             result["failures"].append("extension missing: pg_trgm")
 
-        # --- 3. Phase 4.6 column ------------------------------------------
-        print(f"\n{BOLD}3. Phase 4.6 column: monthly_snapshots.notes{RESET}")
+        # --- 3. notes column ----------------------------------------------
+        print(f"\n{BOLD}3. notes column: monthly_snapshots.notes{RESET}")
         notes_col = await conn.fetchval(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = 'monthly_snapshots' AND column_name = 'notes'"
@@ -146,7 +146,7 @@ async def _verify(db_url: str, check_seed: bool) -> dict[str, object]:
             print(f"{_PASS}monthly_snapshots.notes exists")
             result["columns"]["monthly_snapshots.notes"] = True  # type: ignore[index]
         else:
-            print(f"{_FAIL}monthly_snapshots.notes MISSING (Phase 4.6 not migrated)")
+            print(f"{_FAIL}monthly_snapshots.notes MISSING (not migrated)")
             result["columns"]["monthly_snapshots.notes"] = False  # type: ignore[index]
             result["failures"].append("column missing: monthly_snapshots.notes")
 

@@ -26,7 +26,7 @@ yellow(){ printf "\033[33m%s\033[0m\n" "$1"; }
 bold()  { printf "\033[1m%s\033[0m\n" "$1"; }
 
 echo ""
-bold "Lambat Registry Bot — HTTP smoke check"
+bold "Lambat Registry Bot - HTTP smoke check"
 bold "Target: $BASE_URL"
 echo ""
 
@@ -51,7 +51,7 @@ else
   db=$(echo "$health_body" | grep -oE '"db"[[:space:]]*:[[:space:]]*(true|false)' | head -1 | sed -E 's/.*:(true|false).*/\1/')
 
   if [ "$status" = "ok" ] && [ "$gw" = "true" ] && [ "$db" = "true" ]; then
-    green "  ✓ /healthz 200 — status=ok, gateway=true, db=true"
+    green "  ✓ /healthz 200 - status=ok, gateway=true, db=true"
   else
     red "  ✗ /healthz returned 200 but unhealthy state:"
     red "    status=$status gateway=$gw db=$db"
@@ -77,7 +77,7 @@ else
   green "  ✓ /metrics returned 200"
   echo ""
   bold "3. Required metric names present"
-  # Every metric the ROADMAP §1.5 mandates + the scrap-time gauges added in
+  # Every mandated metric name + the scrape-time gauges added in
   # core/metrics.py collect_metrics(). If any is missing, the bot's
   # /metrics endpoint is broken.
   required_metrics=(
@@ -94,7 +94,7 @@ else
       value=$(echo "$metrics_body" | grep -E "^${metric}( |\{|$)" | head -1 | awk '{print $2}')
       green "  ✓ ${metric} = ${value:-<unset>}"
     else
-      red "  ✗ ${metric} — MISSING from /metrics output"
+      red "  ✗ ${metric} - MISSING from /metrics output"
       FAIL=1
     fi
   done
@@ -103,7 +103,7 @@ echo ""
 
 # --- Summary ------------------------------------------------------------------
 if [ "$FAIL" -ne 0 ]; then
-  red "$(bold '✗ Smoke check FAILED — see above.')"
+  red "$(bold '✗ Smoke check FAILED - see above.')"
   exit 1
 else
   green "$(bold '✓ All smoke checks passed.')"

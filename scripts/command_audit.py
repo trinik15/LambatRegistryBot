@@ -66,9 +66,9 @@ EXPECTED_COMMANDS: dict[str, list[str]] = {
     "emoji": ["set", "list"],
     # /server group
     "server": ["status", "ping", "online", "trends"],
-    # /snapshot group (Phase 4.6)
+    # /snapshot group
     "snapshot": ["annotate", "list", "clear"],
-    # /factory group (Phase B / WS-6)
+    # /factory group
     "factory": ["info", "list", "recipe"],
     # /application group
     "application": ["list"],
@@ -94,7 +94,7 @@ def _subcommands_of(cmd: dict) -> set[str]:
 
     Discord returns groups as a top-level command with ``options`` of
     ``type == 1`` (Subcommand) or ``type == 2`` (SubcommandGroup). We only go
-    one level deep — Lambat's groups are flat (no nested subcommand groups).
+    one level deep - Lambat's groups are flat (no nested subcommand groups).
     """
     subs: set[str] = set()
     for opt in cmd.get("options", []) or []:
@@ -188,7 +188,7 @@ async def _audit(token: str, guild_id: int) -> dict[str, object]:
     print(f"{BOLD}Expected vs synced{RESET}")
     for name, expected_subs in EXPECTED_COMMANDS.items():
         if name not in actual:
-            print(f"{_FAIL}{name} — MISSING entirely")
+            print(f"{_FAIL}{name} - MISSING entirely")
             result["missing"].append(name)
             result["failures"].append(f"command missing: {name}")
             continue
@@ -208,7 +208,7 @@ async def _audit(token: str, guild_id: int) -> dict[str, object]:
         else:
             print(f"{_PASS}/{name}  (standalone)")
 
-    # Unexpected commands (informational — not a failure, but worth flagging).
+    # Unexpected commands (informational - not a failure, but worth flagging).
     unexpected = sorted(set(actual) - set(EXPECTED_COMMANDS))
     if unexpected:
         print(f"\n{_WARN}Unexpected commands (not in inventory, not a failure):")
