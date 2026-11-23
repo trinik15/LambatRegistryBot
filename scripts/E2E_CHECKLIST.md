@@ -1,6 +1,6 @@
-# Lambat Registry Bot — End-to-End Test Checklist
+# Lambat Registry Bot - End-to-End Test Checklist
 
-A walk-through of every Phase 0–4 feature against a real Discord + real
+A walk-through of every feature against a real Discord + real
 Postgres. Run this AFTER `python scripts/preflight.py` passes and the bot is
 running (`python main.py` or `docker compose up`).
 
@@ -9,7 +9,7 @@ running (`python main.py` or `docker compose up`).
 ## Automated harness (run this FIRST)
 
 Before doing the manual Discord walk-through below, run the automated Windows
-harness — it covers everything that does NOT need a human clicking in Discord:
+harness - it covers everything that does NOT need a human clicking in Discord:
 
 ```powershell
 # One-time: install the dev tooling into your Python.
@@ -32,14 +32,14 @@ pip install -e ".[dev]"
 .\scripts\run_e2e.ps1 -Stages S3
 ```
 
-The harness runs 15 stages (S0–S14) and writes a structured markdown report.
+The harness runs 15 stages (S0-S14) and writes a structured markdown report.
 **Only after the automated report is all-green should you start the manual
 Discord checklist below** (the manual steps exercise the slash commands the
 automated harness cannot click).
 
 | Stage | What it checks | Needs |
 |-------|----------------|-------|
-| S0 | python / docker / git / .env present | — |
+| S0 | python / docker / git / .env present | - |
 | S1 | `ruff format --check .` | python + deps |
 | S2 | `ruff check .` | python + deps |
 | S3 | `mypy` (28 source files) | python + deps |
@@ -47,18 +47,18 @@ automated harness cannot click).
 | S5 | `docker compose build` | Docker Desktop |
 | S6 | `docker compose up -d` | Docker Desktop |
 | S7 | poll `/healthz` until healthy (≤2 min) | bot running |
-| S8 | `preflight.py` — token/guild/role/channel | DISCORD_TOKEN |
-| S9 | `seed.py` — 5 settlements + 6 citizens | DB up |
-| S10 | `smoke_check.ps1` — /healthz + /metrics | bot running |
-| S11 | `db_verify.py --check-seed` — schema + seed | DB up |
-| S12 | `command_audit.py` — all 13 slash cmds synced | DISCORD_TOKEN |
+| S8 | `preflight.py` - token/guild/role/channel | DISCORD_TOKEN |
+| S9 | `seed.py` - 5 settlements + 6 citizens | DB up |
+| S10 | `smoke_check.ps1` - /healthz + /metrics | bot running |
+| S11 | `db_verify.py --check-seed` - schema + seed | DB up |
+| S12 | `command_audit.py` - all 13 slash cmds synced | DISCORD_TOKEN |
 | S13 | capture last 200 lines of bot logs | Docker |
 | S14 | `docker compose down` (unless `-KeepRunning`) | Docker |
 
 ---
 
 **How to use:** tick each box as the command succeeds. If anything fails,
-check `lambat_bot.log` first — every failure is logged at WARNING/ERROR with
+check `lambat_bot.log` first - every failure is logged at WARNING/ERROR with
 a traceback.
 
 **Prerequisite:** run `python scripts/seed.py` first so the read commands have
@@ -69,15 +69,15 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 ## Setup (do once)
 
 - [ ] `cp .env.example .env` and filled in DISCORD_TOKEN, GUILD_ID, role IDs
-- [ ] `python scripts/preflight.py` — all critical checks pass
+- [ ] `python scripts/preflight.py` - all critical checks pass
 - [ ] `docker compose up --build` (OR `python main.py` if running locally with your own Postgres)
 - [ ] Bot log shows: `Discord gateway: READY` + `Synced N commands to guild`
-- [ ] `./scripts/smoke_check.sh` — all HTTP + metric checks pass
-- [ ] `python scripts/seed.py` — registry seeded with 5 settlements + 6 citizens
+- [ ] `./scripts/smoke_check.sh` - all HTTP + metric checks pass
+- [ ] `python scripts/seed.py` - registry seeded with 5 settlements + 6 citizens
 
 ---
 
-## Phase 0 — Backup, health, naming
+## Backups, health & naming
 
 - [ ] `/data backup note:smoke` → "Backup created" + a `.sql` file appears in `backups/`
 - [ ] `/data list_backups` → your smoke backup is listed
@@ -86,7 +86,7 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 
 ---
 
-## Phase 1 — Quality foundation
+## Quality foundation
 
 - [ ] `ruff format --check .` → clean
 - [ ] `ruff check .` → clean
@@ -97,7 +97,7 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 
 ---
 
-## Phase 2 — Auditability + data model
+## Auditability & data model
 
 - [ ] `/settlement add name:Testville duchy:Capital` → "Added settlement"
 - [ ] `/settlement list` → shows Testville under Capital (with the capital emoji)
@@ -113,7 +113,7 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 
 ---
 
-## Phase 3 — Feature expansion
+## Feature expansion
 
 ### 3.1 CSV bulk import
 - [ ] Create a CSV with columns: `ign,discord_id,settlement,recruiter_ids` (3-4 rows)
@@ -142,14 +142,14 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 - [ ] Submit another app, click **Reject** with a note → app status flips to rejected
 
 ### 3.5 Activity time-series chart
-- [ ] `/report activity` → renders a time-series PNG from monthly_snapshots (may be empty if no snapshots exist yet — that's OK)
+- [ ] `/report activity` → renders a time-series PNG from monthly_snapshots (may be empty if no snapshots exist yet - that's OK)
 - [ ] `/report activity settlement:Lambat City` → per-settlement chart
 - [ ] Run `python -c "import asyncio; from tasks.activity_monitor import ActivityMonitor; ..."` to manually trigger a snapshot, then re-run `/report activity` to see data
 
 ### 3.6 Activity export
 - [ ] `/report export` → DMs you a CSV with citizen columns only
 - [ ] `/report export include_activity:True` → CSV now has an `activity` column with values like "Active", "Semi-active", "Inactive", "Unknown"
-- [ ] Open the CSV in a spreadsheet — rows match `/citizen list`
+- [ ] Open the CSV in a spreadsheet - rows match `/citizen list`
 
 ### 3.7 Governance notifications
 - [ ] Every mutation in the sections above also posted a plain-language embed to GOVERNANCE_CHANNEL_ID (e.g. "🟢 New Citizen: TestUser joined Lambat City")
@@ -165,7 +165,7 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 
 ---
 
-## Phase 4 — Hardening & ops polish
+## Hardening & ops polish
 
 ### 4.1 Graceful shutdown (SIGTERM)
 - [ ] `docker compose stop bot` → logs show an orderly close (loops cancelled, DB pool released, gateway closed) within `SHUTDOWN_GRACE_SECONDS`
@@ -183,7 +183,7 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 
 ### 4.5 i18n (LOCALE=en default; fil stretch)
 - [ ] With `LOCALE=en`, `/help` shows English strings
-- [ ] Set `LOCALE=fil`, restart, `/help` → Filipino /help embed (other strings fall back to en — documented)
+- [ ] Set `LOCALE=fil`, restart, `/help` → Filipino /help embed (other strings fall back to en - documented)
 
 ### 4.6 Snapshot annotations + /snapshot cog
 - [ ] `/snapshot annotate date:<a monthly snapshot date> note:Test annotation` → "Snapshot annotated"
@@ -191,7 +191,7 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 - [ ] `/snapshot clear date:<same>` → note removed
 - [ ] `/report trends` → annotated months show the note text on the chart
 
-### Phase B (CivInfo plan) — /server trends + /factory
+### CivInfo plan - /server trends + /factory
 - [ ] `/server trends period:Last 24 hours` → embed with a 24h player-count sparkline/summary
 - [ ] `/factory info <factory>` → setup cost + recipes
 - [ ] `/factory list` → all FactoryMod factories
@@ -204,7 +204,7 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 - [ ] Watch logs at 02:00 UTC → `daily_check` runs (CivInfo refresh)
 - [ ] Watch logs at 02:00 UTC → `daily_backup` runs (pg_dump)
 - [ ] On the 1st of the month → monthly census report posted to MONTHLY_REPORT_CHANNEL_ID + snapshot saved
-- [ ] Uptime monitor polls every 5 min — check logs for `UptimeMonitor` INFO lines
+- [ ] Uptime monitor polls every 5 min - check logs for `UptimeMonitor` INFO lines
 - [ ] Weekly role sync runs on ROLE_SYNC_WEEKLY_DAY at ROLE_SYNC_WEEKLY_HOUR UTC
 
 ---
@@ -212,16 +212,16 @@ data to show. (Skip this if you want to test the empty-state UX too.)
 ## Clean teardown
 
 - [ ] Ctrl-C the bot → log shows clean shutdown ("Bot shutdown complete.")
-- [ ] `docker compose down` (if using compose) — containers stop cleanly
-- [ ] `docker compose down -v` — wipes the Postgres volume for a fresh re-test
+- [ ] `docker compose down` (if using compose) - containers stop cleanly
+- [ ] `docker compose down -v` - wipes the Postgres volume for a fresh re-test
 
 ---
 
 ## What to do if something fails
 
-1. **Check `lambat_bot.log`** — every error is there with a traceback.
-2. **Re-run `python scripts/preflight.py`** — catches config / permission regressions.
-3. **Re-run `./scripts/smoke_check.sh`** — catches HTTP / metrics regressions.
+1. **Check `lambat_bot.log`** - every error is there with a traceback.
+2. **Re-run `python scripts/preflight.py`** - catches config / permission regressions.
+3. **Re-run `./scripts/smoke_check.sh`** - catches HTTP / metrics regressions.
 4. **Check the DB directly:**
    ```bash
    docker exec -it lambat-db psql -U lambat -d lambat -c "SELECT * FROM citizens LIMIT 5;"
